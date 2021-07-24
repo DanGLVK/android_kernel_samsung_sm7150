@@ -77,7 +77,7 @@ static struct system_pm_ops *sys_pm_ops;
 
 struct lpm_cluster *lpm_root_node;
 
-static bool cluster_use_deepest_state;
+static bool cluster_use_deepest_state = true;
 module_param(cluster_use_deepest_state, bool, 0664);
 
 void lpm_cluster_use_deepest_state(bool enable)
