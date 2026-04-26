@@ -52,7 +52,7 @@ export $(shell sed 's/=.*//' $(srctree)/techpack/audio/config/sm6150_a70s.conf)
 else ifeq ($(filter y,$(CONFIG_SEC_A71_PROJECT)),y)
 include $(srctree)/techpack/audio/config/sm7150_a71.conf
 export $(shell sed 's/=.*//' $(srctree)/techpack/audio/config/sm7150_a71.conf)
-else ifeq ($(PROJECT_NAME),$(filter $(PROJECT_NAME),a90q r1q))
+else ifneq ($(filter $(PROJECT_NAME),a90q r1q),)
 include $(srctree)/techpack/audio/config/sm7150_a90q.conf
 export $(shell sed 's/=.*//' $(srctree)/techpack/audio/config/sm7150_a90q.conf)
 else ifeq ($(filter y,$(CONFIG_SEC_A70SQ_PROJECT)),y)
@@ -150,7 +150,7 @@ LINUXINCLUDE    += \
 else ifeq ($(filter y,$(CONFIG_SEC_A71_PROJECT)),y)
 LINUXINCLUDE    += \
                 -include $(srctree)/techpack/audio/config/sm7150_a71.h
-else ifeq ($(PROJECT_NAME),$(filter $(PROJECT_NAME),a90q r1q))
+else ifneq ($(filter $(PROJECT_NAME),a90q r1q),)
 LINUXINCLUDE    += \
                 -include $(srctree)/techpack/audio/config/sm7150_a90q.h
 else ifeq ($(filter y,$(CONFIG_SEC_A70SQ_PROJECT)),y)
