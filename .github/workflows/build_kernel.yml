@@ -56,7 +56,15 @@ jobs:
             zip \
             zstd
 
-      - name: Download latest Google clang
+      - name: Cache clang
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: llvm-21
+          key: clang-r29-r563880c
+
+      - name: Download Google clang
+        if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           wget -O llvm.tar.zst https://github.com/Ylarod/setup-ndk-clang/releases/download/prebuilt/clang-linux-x86-ndk-r29-r563880c.tar.zst
           mkdir llvm-21; cd llvm-21
