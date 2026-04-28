@@ -1,4 +1,4 @@
-name: Build prime kernel
+name: Build LostPrime kernel
 
 on:
   workflow_dispatch:
@@ -99,7 +99,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: PrimeKernel-${{ matrix.device.name }}-${{ needs.prepare.outputs.release_ts }}
+          name: LostPrime-${{ matrix.device.name }}-${{ needs.prepare.outputs.release_ts }}
           path: AnyKernel3/
 
       - name: Upload release notes
@@ -124,7 +124,7 @@ jobs:
       - name: Zip build artifacts
         run: |
           cd artifacts
-          for dir in PrimeKernel-*; do
+          for dir in LostPrime-*; do
             (
               cd "$dir"
               zip -r "../${dir}.zip" .
@@ -142,7 +142,7 @@ jobs:
         with:
           body_path: version.txt
           tag_name: "${{ needs.prepare.outputs.release_ts }}"
-          name: "PrimeKernel-${{ needs.prepare.outputs.release_ts }}"
+          name: "LostPrime-${{ needs.prepare.outputs.release_ts }}"
           files: artifacts/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
