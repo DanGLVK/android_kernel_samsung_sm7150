@@ -35,8 +35,7 @@ jobs:
     strategy:
       matrix:
         device:
-          - { name: a71, device2: a71xxx, soc: sdmmagpie }
-          - { name: a70q, device2: a70, soc: sm6150 }
+          - { name: m51, device2: m51xxx, soc: sdmmagpie }
 
     steps:
       - name: Checkout repository
@@ -81,7 +80,7 @@ jobs:
             "${{ matrix.device.soc }}"
 
       - name: Generate release notes
-        if: matrix.device.name == 'a71'
+        if: matrix.device.name == 'm51'
         run: |
           : > version.txt
           echo "**Kernel version:** $(cat out/include/config/kernel.release)  " >> version.txt
@@ -104,7 +103,7 @@ jobs:
           path: AnyKernel3/
 
       - name: Upload release notes
-        if: matrix.device.name == 'a71'
+        if: matrix.device.name == 'm51'
         uses: actions/upload-artifact@v5
         with:
           name: release-notes
