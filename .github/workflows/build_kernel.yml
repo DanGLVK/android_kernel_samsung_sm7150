@@ -59,17 +59,16 @@ jobs:
         id: cache-clang
         uses: actions/cache@v4
         with:
-          path: llvm-21
-          key: clang-r29-r563880c
+          path: llvm-22
+          key: llvm-22.1.4-slim
 
-      - name: Download Google clang
+      - name: Download Slim LLVM
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          wget -O llvm.tar.zst https://github.com/Ylarod/setup-ndk-clang/releases/download/prebuilt/clang-linux-x86-ndk-r29-r563880c.tar.zst
-          mkdir llvm-21; cd llvm-21
-          tar -I unzstd -xf ../llvm.tar.zst
-          rm ../llvm.tar.zst
-          cd ..
+          wget -O llvm.tar.gz https://www.kernel.org/pub/tools/llvm/files/llvm-22.1.4-x86_64.tar.gz
+          mkdir llvm-22;
+          tar -C llvm-22 --strip-components=1 -xzf llvm.tar.gz
+          rm llvm.tar.gz
 
       - name: Build kernel
         run: |
