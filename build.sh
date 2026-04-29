@@ -4,6 +4,7 @@ KERNEL_DIR=$(pwd)
 DEVICE="$1"
 DEVICE2="$2"
 SOC="$3"
+KSU_STATUS="$4"
 
 build_kernel() {
     echo "-----------------------------------------------"
@@ -25,6 +26,10 @@ CONFIG_THINLTO=y
 # CONFIG_LTO_NONE is not set
 CONFIG_LTO_CLANG=y
     " >> arch/arm64/configs/temp_defconfig
+
+    if [ "$KSU_STATUS" == "n" ]; then
+        echo "# CONFIG_KSU is not set" >> arch/arm64/configs/temp_defconfig
+    fi    
 
     make $BUILD_VAR temp_defconfig
     rm arch/arm64/configs/temp_defconfig

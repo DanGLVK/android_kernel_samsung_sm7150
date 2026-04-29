@@ -36,6 +36,7 @@ jobs:
       matrix:
         device:
           - { name: m51, device2: m51nsxx, soc: sdmmagpie }
+        ksu_status: [ "y", "n" ]
 
     steps:
       - name: Checkout repository
@@ -76,10 +77,11 @@ jobs:
           bash build.sh \
             "${{ matrix.device.name }}" \
             "${{ matrix.device.device2 }}" \
-            "${{ matrix.device.soc }}"
+            "${{ matrix.device.soc }}" \
+            "${{ matrix.ksu_status }}"
 
       - name: Generate release notes
-        if: matrix.device.name == 'm51'
+        if: matrix.device.name == 'm51' && matrix.ksu_status == 'y'
         run: |
           : > version.txt
           echo "![Downloads](https://img.shields.io/github/downloads/kurtnettle/android_kernel_samsung_sm7150/${{ needs.prepare.outputs.release_ts }}/total)" >> version.txt
@@ -100,11 +102,11 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: LostPrime-${{ matrix.device.name }}-${{ needs.prepare.outputs.release_ts }}
+          name: LostPrime-${{ matrix.device.name }}-${{ matrix.ksu_status == 'y' && 'ksu' || 'non-ksu' }}_${{ needs.prepare.outputs.release_ts }}
           path: AnyKernel3/
 
       - name: Upload release notes
-        if: matrix.device.name == 'm51'
+        if: matrix.device.name == 'm51' && matrix.ksu_status == 'y'
         uses: actions/upload-artifact@v5
         with:
           name: release-notes
