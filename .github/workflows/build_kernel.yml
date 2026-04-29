@@ -35,7 +35,7 @@ jobs:
     strategy:
       matrix:
         device:
-          - { name: m51, device2: m51xxx, soc: sdmmagpie }
+          - { name: m51, device2: m51nsxx, soc: sdmmagpie }
 
     steps:
       - name: Checkout repository
