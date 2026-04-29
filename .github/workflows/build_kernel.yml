@@ -82,6 +82,8 @@ jobs:
         if: matrix.device.name == 'm51'
         run: |
           : > version.txt
+          echo "![Downloads](https://img.shields.io/github/downloads/kurtnettle/android_kernel_samsung_sm7150/${{ needs.prepare.outputs.release_ts }}/total)" >> version.txt
+          echo >> version.txt
           echo "**Kernel version:** $(cat out/include/config/kernel.release)  " >> version.txt
           echo >> version.txt
           export KHASH="$(git rev-parse HEAD)"
