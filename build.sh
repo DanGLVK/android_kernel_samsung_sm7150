@@ -28,7 +28,10 @@ CONFIG_LTO_CLANG=y
     " >> arch/arm64/configs/temp_defconfig
 
     if [ "$KSU_STATUS" == "n" ]; then
-        echo "# CONFIG_KSU is not set" >> arch/arm64/configs/temp_defconfig
+        echo "
+# CONFIG_KSU is not set
+CONFIG_SECCOMP=y
+" >> arch/arm64/configs/temp_defconfig
     fi    
 
     make $BUILD_VAR temp_defconfig
