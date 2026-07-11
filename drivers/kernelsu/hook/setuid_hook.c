@@ -16,46 +16,13 @@ static inline bool is_zygote_normal_app_uid(uid_t uid)
 }
 
 extern u32 susfs_zygote_sid;
-extern struct cred *ksu_cred;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-extern void susfs_run_sus_path_loop(void);
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+// - susfs_extra_works is defined and initialized (via INIT_WORK) in fs/susfs.c.
+//   Its work handler, susfs_run_extra_works(), takes care of re-flagging sus
+//   paths (and any other deferred susfs works) with the proper ksu_cred context
+//   applied internally, so we only need to queue it here.
+extern struct work_struct susfs_extra_works;
 
-struct susfs_handle_setuid_tw {
-	struct callback_head cb;
-};
-
-static void susfs_handle_setuid_tw_func(struct callback_head *cb)
-{
-	struct susfs_handle_setuid_tw *tw = container_of(cb, struct susfs_handle_setuid_tw, cb);
-	const struct cred *saved = override_creds(ksu_cred);
-
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	susfs_run_sus_path_loop();
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-
-	revert_creds(saved);
-	kfree(tw);
-}
-
-static void ksu_handle_extra_susfs_work(void)
-{
-	struct susfs_handle_setuid_tw *tw = kzalloc(sizeof(*tw), GFP_ATOMIC);
-
-	if (!tw) {
-		pr_err("susfs: No enough memory\n");
-		return;
-	}
-
-	tw->cb.func = susfs_handle_setuid_tw_func;
-
-	int err = task_work_add(current, &tw->cb, TWA_RESUME);
-	if (err) {
-		kfree(tw);
-		pr_err("susfs: Failed adding task_work 'susfs_handle_setuid_tw', err: %d\n", err);
-	}
-}
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 extern void susfs_try_umount(uid_t uid);
 #endif // #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
@@ -108,12 +75,13 @@ do_umount:
     susfs_try_umount(new_uid);
 #endif // #ifndef CONFIG_KSU_SUSFS_TRY_UMOUNT
 
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-    //susfs_run_sus_path_loop(new_uid);
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-
 #ifdef CONFIG_KSU_SUSFS
-    ksu_handle_extra_susfs_work();
+    // - defer extra susfs works to workqueue after do_umount so that we do not
+    //   block here and reduce the risk of time side channel as much as possible.
+    //   susfs_extra_works is initialized in susfs_init() and its handler runs
+    //   susfs_run_sus_path_loop() (which now applies ksu_cred internally) on a
+    //   background kernel worker thread.
+    queue_work(system_wq, &susfs_extra_works);
 
     susfs_set_current_proc_umounted();
 
