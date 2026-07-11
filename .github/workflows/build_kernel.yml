@@ -36,7 +36,7 @@ jobs:
       matrix:
         device:
           - { name: m51, device2: m51nsxx, soc: sdmmagpie }
-        ksu_status: [ "y", "n" ]
+        ksu_status: [ "y" ]
 
     steps:
       - name: Checkout repository
