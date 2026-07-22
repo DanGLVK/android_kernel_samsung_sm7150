@@ -702,16 +702,43 @@ int utf8byte(struct utf8cursor *u8c)
 		if (utf8agetab[LEAF_GEN(leaf)] > u8c->data->maxage) {
 			ccc = STOPPER;
 		} else if (ccc == DECOMPOSE) {
-			u8c->len -= utf8clen(u8c->s);
-			u8c->p = u8c->s + utf8clen(u8c->s);
-			u8c->s = LEAF_STR(leaf);
-			/* Empty decomposition implies CCC 0. */
-			if (*u8c->s == '\0') {
-				if (u8c->ccc == STOPPER)
+			/*
+			 * Peek at the decomposition before touching any
+			 * cursor state. Empty decomposition implies CCC 0
+			 * (Default_Ignorable_Code_Point, e.g. zero-width
+			 * space): the character contributes nothing to the
+			 * output and must not be emitted verbatim.
+			 */
+			if (*LEAF_STR(leaf) == '\0') {
+				if (u8c->ccc == STOPPER) {
+					/*
+					 * Not mid-scan: consume this
+					 * character ourselves (nothing else
+					 * will) and move on.
+					 */
+					if (!u8c->p)
+						u8c->len -= utf8clen(u8c->s);
+					u8c->s += utf8clen(u8c->s);
 					continue;
+				}
+				/*
+				 * Mid-scan: treat it as an ordinary stopper.
+				 * u8c->s still points at this (undecomposed)
+				 * character, so the mismatch handler below
+				 * consumes it exactly once, the same way it
+				 * consumes any other stopper.
+				 */
 				ccc = STOPPER;
 				goto ccc_mismatch;
 			}
+
+			/*
+			 * Non-empty decomposition: only now do we commit to
+			 * moving the cursor into it.
+			 */
+			u8c->len -= utf8clen(u8c->s);
+			u8c->p = u8c->s + utf8clen(u8c->s);
+			u8c->s = LEAF_STR(leaf);
 
 			leaf = utf8lookup(u8c->data, u8c->hangul, u8c->s);
 			if (!leaf)
