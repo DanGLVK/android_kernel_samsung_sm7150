@@ -41,7 +41,7 @@
 #define save_dst		x15
 #define save_src		x16
 #define offset_src_ptr		x17
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0) || defined(CONFIG_SHADOW_CALL_STACK)
 #define w_tmp_match_length	w6
 #define tmp_match_length	x6
 #else
