@@ -1375,8 +1375,13 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 							ts->touch_count++;
 							input_mt_slot(ts->input_dev, t_id);
 							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
+							input_report_key(ts->input_dev, BTN_TOUCH, 1);
+							input_report_key(ts->input_dev, BTN_TOOL_FINGER, 1);
 							input_report_abs(ts->input_dev, ABS_MT_POSITION_X, ts->coord[t_id].p_x);
 							input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, ts->coord[t_id].p_y);
+							if (ts->plat_data->support_mt_pressure)
+								input_report_abs(ts->input_dev, ABS_MT_PRESSURE, ts->coord[t_id].z);
+							input_sync(ts->input_dev);
 						}
 
 						input_mt_slot(ts->input_dev, t_id);
@@ -1429,7 +1434,7 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 
 					} else if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_PRESS) {
 						/* Mitigation 1: Drop ghost pulses from cracked digitizer (z:14-19, major:3-4) */
-						if (ts->coord[t_id].z < 22 || ts->coord[t_id].major < 6) {
+						if (ts->coord[t_id].z < 20 && ts->coord[t_id].major < 5) {
 							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
 							break;
 						}
@@ -1536,11 +1541,11 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						}
 
 						/* Mitigation 2: Anti-Merge Filter for rapid typing.
-						 * If coordinate teleports >600px in X in early move frames,
+						 * If coordinate teleports >500px in X in a single frame,
 						 * it is a separate finger tap merged by the IC, not a drag.
 						 */
 						delta_x = abs((int)ts->coord[t_id].x - (int)ts->coord[t_id].p_x);
-						if (delta_x > 600 && ts->coord[t_id].mcount < 4) {
+						if (delta_x > 500) {
 							input_mt_slot(ts->input_dev, t_id);
 							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
 							input_sync(ts->input_dev);
