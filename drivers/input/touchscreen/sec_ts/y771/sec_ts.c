@@ -1364,9 +1364,19 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 					if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_RELEASE) {
 
 						/* If touch was dropped at press time, ignore release */
-						if (pre_action == SEC_TS_COORDINATE_ACTION_NONE) {
+						if (pre_action == SEC_TS_COORDINATE_ACTION_NONE && !ts->coord[t_id].pending_press) {
 							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
 							break;
+						}
+
+						/* If user tapped and released within 1 frame before any MOVE */
+						if (ts->coord[t_id].pending_press) {
+							ts->coord[t_id].pending_press = false;
+							ts->touch_count++;
+							input_mt_slot(ts->input_dev, t_id);
+							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
+							input_report_abs(ts->input_dev, ABS_MT_POSITION_X, ts->coord[t_id].p_x);
+							input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, ts->coord[t_id].p_y);
 						}
 
 						input_mt_slot(ts->input_dev, t_id);
@@ -1423,6 +1433,12 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
 							break;
 						}
+
+						/* Defer initial press by 1 frame to let centroid settle at true location */
+						ts->coord[t_id].pending_press = true;
+						ts->coord[t_id].p_x = ts->coord[t_id].x;
+						ts->coord[t_id].p_y = ts->coord[t_id].y;
+						break;
 
 						ts->touch_count++;
 						ts->all_finger_count++;
@@ -1487,8 +1503,35 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						int delta_x;
 
 						/* If touch was dropped at press time, ignore movement */
-						if (pre_action == SEC_TS_COORDINATE_ACTION_NONE) {
+						if (pre_action == SEC_TS_COORDINATE_ACTION_NONE && !ts->coord[t_id].pending_press) {
 							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
+							break;
+						}
+
+						/* Centroid Settle: Emit ACTION_DOWN at the true settled coordinates */
+						if (ts->coord[t_id].pending_press) {
+							ts->coord[t_id].pending_press = false;
+							ts->touch_count++;
+							ts->all_finger_count++;
+							ts->coord[t_id].max_energy_x = 0;
+							ts->coord[t_id].max_energy_y = 0;
+
+							input_mt_slot(ts->input_dev, t_id);
+							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
+							input_report_key(ts->input_dev, BTN_TOUCH, 1);
+							input_report_key(ts->input_dev, BTN_TOOL_FINGER, 1);
+
+							input_report_abs(ts->input_dev, ABS_MT_POSITION_X, ts->coord[t_id].x);
+							input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, ts->coord[t_id].y);
+							input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, ts->coord[t_id].major);
+							input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR, ts->coord[t_id].minor);
+
+							if (ts->plat_data->support_mt_pressure)
+								input_report_abs(ts->input_dev, ABS_MT_PRESSURE, ts->coord[t_id].z);
+
+							location_detect(ts, location, ts->coord[t_id].x, ts->coord[t_id].y);
+							ts->coord[t_id].p_x = ts->coord[t_id].x;
+							ts->coord[t_id].p_y = ts->coord[t_id].y;
 							break;
 						}
 
@@ -3062,6 +3105,7 @@ void sec_ts_unlocked_release_all_finger(struct sec_ts_data *ts)
 		input_mt_slot(ts->input_dev, i);
 		input_report_abs(ts->input_dev, ABS_MT_CUSTOM, 0);
 		input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, false);
+		ts->coord[i].pending_press = false;
 
 		if ((ts->coord[i].action == SEC_TS_COORDINATE_ACTION_PRESS) ||
 				(ts->coord[i].action == SEC_TS_COORDINATE_ACTION_MOVE)) {
