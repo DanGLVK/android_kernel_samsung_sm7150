@@ -144,3 +144,5 @@ out/
 *.profdata
 dtb
 zImage
+
+*.md
