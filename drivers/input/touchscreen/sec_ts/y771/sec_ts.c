@@ -1505,8 +1505,6 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 								ts->coord[t_id].max_strength, ts->coord[t_id].hover_id_num);
 #endif
 					} else if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_MOVE) {
-						int delta_x, delta_y;
-
 						/* If touch was dropped at press time, ignore movement */
 						if (pre_action == SEC_TS_COORDINATE_ACTION_NONE && !ts->coord[t_id].pending_press) {
 							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
@@ -1540,22 +1538,19 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 							break;
 						}
 
-						/* Mitigation 2: Anti-Merge Filter for rapid 2-thumb typing.
-						 * Only split when a massive horizontal leap (>1200px) occurs
-						 * across keyboard keys (Y > 1400) with small vertical shift (delta_y < 400).
-						 * This ensures corner swipes, pull-downs, and drag gestures are never split.
+						/* Anti-Merge typing filter commented out for now:
+						 * delta_x = abs((int)ts->coord[t_id].x - (int)ts->coord[t_id].p_x);
+						 * delta_y = abs((int)ts->coord[t_id].y - (int)ts->coord[t_id].p_y);
+						 * if (delta_x > 1200 && delta_y < 400 && ts->coord[t_id].y > 1400) {
+						 *     input_mt_slot(ts->input_dev, t_id);
+						 *     input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
+						 *     input_sync(ts->input_dev);
+						 *     input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
+						 *     ts->coord[t_id].p_x = ts->coord[t_id].x;
+						 *     ts->coord[t_id].p_y = ts->coord[t_id].y;
+						 *     ts->coord[t_id].mcount = 0;
+						 * }
 						 */
-						delta_x = abs((int)ts->coord[t_id].x - (int)ts->coord[t_id].p_x);
-						delta_y = abs((int)ts->coord[t_id].y - (int)ts->coord[t_id].p_y);
-						if (delta_x > 1200 && delta_y < 400 && ts->coord[t_id].y > 1400) {
-							input_mt_slot(ts->input_dev, t_id);
-							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
-							input_sync(ts->input_dev);
-							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
-							ts->coord[t_id].p_x = ts->coord[t_id].x;
-							ts->coord[t_id].p_y = ts->coord[t_id].y;
-							ts->coord[t_id].mcount = 0;
-						}
 						if (p_event_coord->max_energy_flag) {
 							ts->coord[t_id].max_energy_x = ts->coord[t_id].x;
 							ts->coord[t_id].max_energy_y = ts->coord[t_id].y;
