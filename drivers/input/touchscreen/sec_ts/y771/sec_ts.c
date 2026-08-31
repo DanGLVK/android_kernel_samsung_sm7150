@@ -1112,6 +1112,7 @@ static void location_detect(struct sec_ts_data *ts, char *loc, int x, int y)
 static void sec_ts_read_event(struct sec_ts_data *ts)
 {
 	int ret;
+	int i;
 	u8 t_id;
 	u8 event_id;
 	u8 left_event_count;
@@ -1357,6 +1358,43 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 				if (ts->coord[t_id].z <= 0)
 					ts->coord[t_id].z = 1;
 
+				/* Virtual Centroid Reconstruction across crack lines:
+				 * If this slot is within 250px of another active slot on PRESS/MOVE,
+				 * they are dual lobes of a single physical contact split across the crack gap.
+				 * Fuse coordinates and energy into the primary slot and suppress the secondary slot.
+				 */
+				if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_PRESS ||
+				    ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_MOVE) {
+					for (i = 0; i < MAX_SUPPORT_TOUCH_COUNT; i++) {
+						if (i != t_id && (ts->coord[i].action == SEC_TS_COORDINATE_ACTION_PRESS ||
+								  ts->coord[i].action == SEC_TS_COORDINATE_ACTION_MOVE ||
+								  ts->coord[i].pending_press)) {
+							int dx = abs((int)ts->coord[t_id].x - (int)ts->coord[i].x);
+							int dy = abs((int)ts->coord[t_id].y - (int)ts->coord[i].y);
+							if (dx < 250 && dy < 250) {
+								int total_z = (int)ts->coord[t_id].z + (int)ts->coord[i].z;
+								if (total_z == 0) total_z = 1;
+								ts->coord[i].x = ((int)ts->coord[t_id].x * (int)ts->coord[t_id].z +
+										  (int)ts->coord[i].x * (int)ts->coord[i].z) / total_z;
+								ts->coord[i].y = ((int)ts->coord[t_id].y * (int)ts->coord[t_id].z +
+										  (int)ts->coord[i].y * (int)ts->coord[i].z) / total_z;
+								ts->coord[i].z = min(total_z, (int)SEC_TS_PRESSURE_MAX);
+								ts->coord[i].major = max(ts->coord[t_id].major, ts->coord[i].major) + 2;
+
+								if (ts->coord[i].pending_press && ts->coord[t_id].z < 20)
+									ts->coord[i].is_split_fused = true;
+
+								ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
+								ts->coord[t_id].pending_press = false;
+								ts->coord[t_id].is_split_fused = false;
+								break;
+							}
+						}
+					}
+					if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_NONE)
+						break;
+				}
+
 				if ((ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_NORMAL)
 						|| (ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_PALM)
 						|| (ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_WET)
@@ -1369,10 +1407,22 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 							break;
 						}
 
-						/* If user tapped and released within 1 frame before any MOVE */
+						/* Micro-Tap vs Crack Noise Filter:
+						 * If user tapped and released within 1 frame before any MOVE:
+						 * - 13ms phantom electrical spikes from cracks are dropped.
+						 * - Genuine quick micro-taps (z >= 20 || major >= 5) are emitted cleanly.
+						 */
 						if (ts->coord[t_id].pending_press) {
 							ts->coord[t_id].pending_press = false;
+							if (ts->coord[t_id].is_split_fused ||
+							    (ts->coord[t_id].z < 20 && ts->coord[t_id].major < 5)) {
+								ts->coord[t_id].is_split_fused = false;
+								ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
+								break;
+							}
+
 							ts->touch_count++;
+							ts->all_finger_count++;
 							input_mt_slot(ts->input_dev, t_id);
 							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
 							input_report_key(ts->input_dev, BTN_TOUCH, 1);
@@ -1433,13 +1483,10 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						ts->coord[t_id].hover_id_num = 0;
 
 					} else if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_PRESS) {
-						/* Mitigation 1: Drop ghost pulses from cracked digitizer (z:14-19, major:3-4) */
-						if (ts->coord[t_id].z < 20 && ts->coord[t_id].major < 5) {
-							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
-							break;
-						}
-
-						/* Defer initial press by 1 frame to let centroid settle at true location */
+						/* Centroid Settling & Sustain Buffer:
+						 * Defer initial press by 1 frame to let centroid settle at true location
+						 * and verify touch persistence before emitting to Android.
+						 */
 						ts->coord[t_id].pending_press = true;
 						ts->coord[t_id].p_x = ts->coord[t_id].x;
 						ts->coord[t_id].p_y = ts->coord[t_id].y;
@@ -1514,6 +1561,7 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						/* Centroid Settle: Emit ACTION_DOWN at the true settled coordinates */
 						if (ts->coord[t_id].pending_press) {
 							ts->coord[t_id].pending_press = false;
+							ts->coord[t_id].is_split_fused = false;
 							ts->touch_count++;
 							ts->all_finger_count++;
 							ts->coord[t_id].max_energy_x = 0;
@@ -3108,6 +3156,7 @@ void sec_ts_unlocked_release_all_finger(struct sec_ts_data *ts)
 		input_report_abs(ts->input_dev, ABS_MT_CUSTOM, 0);
 		input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, false);
 		ts->coord[i].pending_press = false;
+		ts->coord[i].is_split_fused = false;
 
 		if ((ts->coord[i].action == SEC_TS_COORDINATE_ACTION_PRESS) ||
 				(ts->coord[i].action == SEC_TS_COORDINATE_ACTION_MOVE)) {
