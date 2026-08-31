@@ -1363,6 +1363,12 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						|| (ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_GLOVE)) {
 					if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_RELEASE) {
 
+						/* If touch was dropped at press time, ignore release */
+						if (pre_action == SEC_TS_COORDINATE_ACTION_NONE) {
+							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
+							break;
+						}
+
 						input_mt_slot(ts->input_dev, t_id);
 						if (ts->plat_data->support_mt_pressure)
 							input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
@@ -1412,6 +1418,12 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						ts->coord[t_id].hover_id_num = 0;
 
 					} else if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_PRESS) {
+						/* Mitigation 1: Drop ghost pulses from cracked digitizer (z:14-19, major:3-4) */
+						if (ts->coord[t_id].z < 22 || ts->coord[t_id].major < 6) {
+							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
+							break;
+						}
+
 						ts->touch_count++;
 						ts->all_finger_count++;
 						ts->coord[t_id].max_energy_x = 0;
@@ -1472,6 +1484,28 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 								ts->coord[t_id].max_strength, ts->coord[t_id].hover_id_num);
 #endif
 					} else if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_MOVE) {
+						int delta_x;
+
+						/* If touch was dropped at press time, ignore movement */
+						if (pre_action == SEC_TS_COORDINATE_ACTION_NONE) {
+							ts->coord[t_id].action = SEC_TS_COORDINATE_ACTION_NONE;
+							break;
+						}
+
+						/* Mitigation 2: Anti-Merge Filter for rapid typing.
+						 * If coordinate teleports >600px in X in early move frames,
+						 * it is a separate finger tap merged by the IC, not a drag.
+						 */
+						delta_x = abs((int)ts->coord[t_id].x - (int)ts->coord[t_id].p_x);
+						if (delta_x > 600 && ts->coord[t_id].mcount < 4) {
+							input_mt_slot(ts->input_dev, t_id);
+							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
+							input_sync(ts->input_dev);
+							input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 1);
+							ts->coord[t_id].p_x = ts->coord[t_id].x;
+							ts->coord[t_id].p_y = ts->coord[t_id].y;
+							ts->coord[t_id].mcount = 0;
+						}
 						if (p_event_coord->max_energy_flag) {
 							ts->coord[t_id].max_energy_x = ts->coord[t_id].x;
 							ts->coord[t_id].max_energy_y = ts->coord[t_id].y;
