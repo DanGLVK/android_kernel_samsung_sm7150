@@ -20,9 +20,7 @@
 #include <linux/usb/f_accessory.h>
 #include <linux/miscdevice.h>
 
-#ifdef CONFIG_USB_NOTIFY_PROC_LOG
 #include <linux/usb_notify.h>
-#endif
 
 #define MAX_INST_NAME_LEN		40
 #define MAX_NAME_LEN	40
