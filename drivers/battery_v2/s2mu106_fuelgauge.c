@@ -1390,7 +1390,7 @@ static int s2mu106_get_ocv(struct s2mu106_fuelgauge_data *fuelgauge)
 	ocv_arr = fuelgauge->info.ocv_arr_val;
 #endif
 
-	dev_err(&fuelgauge->i2c->dev,
+	dev_dbg(&fuelgauge->i2c->dev,
 		"%s: soc (%d) soc_arr[TABLE_SIZE-1] (%d) ocv_arr[TABLE_SIZE-1) (%d)\n",
 		__func__, soc, soc_arr[TABLE_SIZE-1], ocv_arr[TABLE_SIZE-1]);
 	if (soc <= soc_arr[high_index]) {

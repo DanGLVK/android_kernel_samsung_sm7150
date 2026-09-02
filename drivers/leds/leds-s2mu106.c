@@ -1248,9 +1248,7 @@ static int s2mu106_led_suspend(struct device *dev)
 	pr_info("%s(%s)\n", __func__,dev_driver_string(dev));
 
 	pinctrl_i2c = devm_pinctrl_get_select(dev->parent, "flash_suspend");
-	if (IS_ERR_OR_NULL(pinctrl_i2c)) {
-		printk(KERN_ERR "%s: Failed to configure i2c pin\n", __func__);
-	} else {
+	if (!IS_ERR_OR_NULL(pinctrl_i2c)) {
 		devm_pinctrl_put(pinctrl_i2c);
 	}
 
