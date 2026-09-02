@@ -719,7 +719,6 @@ struct sec_ts_coordinate {
 	u8 max_strength;
 	u8 hover_id_num;
 	bool pending_press;
-	bool is_split_fused;
 };
 
 
