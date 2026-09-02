@@ -61,15 +61,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: llvm-22
-          key: llvm-22.1.4-slim
+          key: clang-r596125
 
-      - name: Download Slim LLVM
+      - name: Download prebuilt Google clang
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          wget -O llvm.tar.gz https://www.kernel.org/pub/tools/llvm/files/llvm-22.1.4-x86_64.tar.gz
-          mkdir llvm-22;
-          tar -C llvm-22 --strip-components=1 -xzf llvm.tar.gz
-          rm llvm.tar.gz
+          wget -O llvm.tar.gz https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz
+          mkdir llvm-22; cd llvm-22
+          tar -xf ../llvm.tar.gz
+          rm ../llvm.tar.gz
+          cd ..
 
       - name: Build kernel
         run: |
