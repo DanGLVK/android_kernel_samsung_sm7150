@@ -29,22 +29,21 @@
 #define ATOMIC_OP(op, asm_op)                                                  \
   static inline void atomic_##op(int i, atomic_t *v) {                         \
     register int w0 asm("w0") = i;                                             \
-    register atomic_t *x1 asm("x1") = v;				\
-									\
-<<<<<<< HEAD
-asm volatile(__LSE_PREAMBLE ARM64_LSE_ATOMIC_INSN(__LL_SC_ATOMIC(op),			\
-=======
-asm volatile(ARM64_LSE_ATOMIC_INSN(/* LL/SC */
-                                   __LL_SC_ATOMIC(op)
-                                       __nops(1), /* LSE atomics */
-                                   "	prfm	pstl1strm, %[v]\n"					\
->>>>>>> 8757e4e2c787 (arm64: lse: Prefetch operands to speed up atomic operations)
-                                                  "	" #asm_op
-                                                  "	%w[i], %[v]\n")
-             : [i] "+r"(w0), [v] "+Q"(v->counter)
-             : "r"(x1)
-             : __LL_SC_CLOBBERS);
-}
+    register atomic_t *x1 asm("x1") = v;                                       \
+                                                                               \
+    asm volatile(                                                              \
+        __LSE_PREAMBLE                                                         \
+        ARM64_LSE_ATOMIC_INSN(                                                 \
+            /* LL/SC */                                                        \
+            __LL_SC_ATOMIC(op)                                                 \
+            __nops(1),                                                         \
+            /* LSE atomics */                                                  \
+            "	prfm	pstl1strm, %[v]\n"                                 \
+            "	" #asm_op "	%w[i], %[v]\n")                            \
+        : [i] "+r"(w0), [v] "+Q"(v->counter)                                   \
+        : "r"(x1)                                                              \
+        : __LL_SC_CLOBBERS);                                                   \
+  }
 
 ATOMIC_OP(andnot, stclr)
 ATOMIC_OP(or, stset)
@@ -232,22 +231,21 @@ ATOMIC_FETCH_OP_SUB(, al, "memory")
 #define ATOMIC64_OP(op, asm_op)                                                \
   static inline void atomic64_##op(long i, atomic64_t *v) {                    \
     register long x0 asm("x0") = i;                                            \
-    register atomic64_t *x1 asm("x1") = v;				\
-									\
-<<<<<<< HEAD
-asm volatile(__LSE_PREAMBLE ARM64_LSE_ATOMIC_INSN(__LL_SC_ATOMIC64(op),			\
-=======
-asm volatile(ARM64_LSE_ATOMIC_INSN(/* LL/SC */
-                                   __LL_SC_ATOMIC64(op)
-                                       __nops(1), /* LSE atomics */
-                                   "	prfm	pstl1strm, %[v]\n"					\
->>>>>>> 8757e4e2c787 (arm64: lse: Prefetch operands to speed up atomic operations)
-                                                  "	" #asm_op
-                                                  "	%[i], %[v]\n")
-             : [i] "+r"(x0), [v] "+Q"(v->counter)
-             : "r"(x1)
-             : __LL_SC_CLOBBERS);
-}
+    register atomic64_t *x1 asm("x1") = v;                                     \
+                                                                               \
+    asm volatile(                                                              \
+        __LSE_PREAMBLE                                                         \
+        ARM64_LSE_ATOMIC_INSN(                                                 \
+            /* LL/SC */                                                        \
+            __LL_SC_ATOMIC64(op)                                               \
+            __nops(1),                                                         \
+            /* LSE atomics */                                                  \
+            "	prfm	pstl1strm, %[v]\n"                                 \
+            "	" #asm_op "	%[i], %[v]\n")                             \
+        : [i] "+r"(x0), [v] "+Q"(v->counter)                                   \
+        : "r"(x1)                                                              \
+        : __LL_SC_CLOBBERS);                                                   \
+  }
 
 ATOMIC64_OP(andnot, stclr)
 ATOMIC64_OP(or, stset)
