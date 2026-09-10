@@ -41,7 +41,7 @@ static inline rwlock_t *ksu_get_policy_rwlock() { extern rwlock_t policy_rwlock;
 #elif defined(CONFIG_KALLSYMS)
 static noinline rwlock_t *ksu_get_policy_rwlock() { return (rwlock_t *)kallsyms_lookup_name("policy_rwlock"); }
 #else
-static inline rwlock_t *ksu_get_policy_rwlock() { return NULL; }
+static inline rwlock_t *ksu_get_policy_rwlock() { return nullptr; }
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0) || defined(KSU_COMPAT_HAS_BACKPORTED_CPUS_PTR)
@@ -200,12 +200,12 @@ out_flush:
 	smp_mb();
 	reset_avc_cache();
 #ifdef CONFIG_KSU_SUSFS
-    // Allow umount in zygote process without installing zygisk
-    //ksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");
-    susfs_set_priv_app_sid();
-    susfs_set_init_sid();
-    susfs_set_ksu_sid();
-    susfs_set_zygote_sid();
+	// Allow umount in zygote process without installing zygisk
+	//ksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");
+	susfs_set_priv_app_sid();
+	susfs_set_init_sid();
+	susfs_set_ksu_sid();
+	susfs_set_zygote_sid();
 #endif // #ifdef CONFIG_KSU_SUSFS
 #endif
 }

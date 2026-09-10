@@ -67,24 +67,26 @@ install_ksu_fd:
 
 kill_seccomp:
 	disable_seccomp();
+	set_thread_flag(TIF_KSU_MANAGED); // sucompat fast-path
 	return;
 do_umount:
-    // Handle kernel umount
 #ifndef CONFIG_KSU_SUSFS_TRY_UMOUNT
+	ksu_handle_umount(new, old);
 #else
-    susfs_try_umount(new_uid);
+	susfs_try_umount(new_uid);
 #endif // #ifndef CONFIG_KSU_SUSFS_TRY_UMOUNT
 
 #ifdef CONFIG_KSU_SUSFS
-    // - defer extra susfs works to workqueue after do_umount so that we do not
-    //   block here and reduce the risk of time side channel as much as possible.
-    //   susfs_extra_works is initialized in susfs_init() and its handler runs
-    //   susfs_run_sus_path_loop() (which now applies ksu_cred internally) on a
-    //   background kernel worker thread.
-    queue_work(system_wq, &susfs_extra_works);
+	// - defer extra susfs works to workqueue after do_umount so that we do not
+	//   block here and reduce the risk of time side channel as much as possible.
+	//   susfs_extra_works is initialized in susfs_init() and its handler runs
+	//   susfs_run_sus_path_loop() (which now applies ksu_cred internally) on a
+	//   background kernel worker thread.
+	queue_work(system_wq, &susfs_extra_works);
 
-    susfs_set_current_proc_umounted();
+	susfs_set_current_proc_umounted();
 
-    return;
+	return;
 #endif // #ifdef CONFIG_KSU_SUSFS
 }
+

@@ -13,6 +13,10 @@
 #define ZYGOTE_CONTEXT "u:r:zygote:s0"
 #define INIT_CONTEXT "u:r:init:s0"
 
+#define KERNEL_ZYGOTE_DOMAIN "u:r:zygote:s0"
+#define KERNEL_INIT_DOMAIN "u:r:init:s0"
+#define KERNEL_PRIV_APP_DOMAIN "u:r:priv_app:s0"
+
 #ifdef CONFIG_KSU_SUSFS
 bool susfs_is_sid_equal(const struct cred *cred, u32 sid2);
 u32 susfs_get_sid_from_name(const char *secctx_name);
@@ -51,3 +55,4 @@ void setup_ksu_cred();
 void escape_to_root_for_adb_root();
 
 #endif
+
