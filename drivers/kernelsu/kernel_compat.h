@@ -91,11 +91,11 @@ filp_open:
 #endif // KEYS && < 5.2
 
 #ifndef READ_ONCE
-#define READ_ONCE(x) (*(const volatile typeof(x) *)&(x))
+#define READ_ONCE(x) (*(const volatile typeof(x) __may_alias *)&(x))
 #endif
 
 #ifndef WRITE_ONCE
-#define WRITE_ONCE(x, y) (*(volatile typeof(x) *)&(x) = (typeof(x))(y))
+#define WRITE_ONCE(x, y) (*(volatile typeof(x) __may_alias *)&(x) = (typeof(x) __may_alias)(y))
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
