@@ -767,10 +767,11 @@ static void fastrpc_mmap_free(struct fastrpc_mmap *map, uint32_t flags)
 		 * (ie process exit), so that maps will be cleared
 		 * even though references are present.
 		 */
-		if (!map->refs && !map->ctx_refs && !map->dma_handle_refs)
-			hlist_del_init(&map->hn);
-		if (map->refs > 0 && !flags)
+		if (!flags && (map->refs > 0 || map->ctx_refs > 0 ||
+			       map->dma_handle_refs > 0))
 			return;
+		if (!hlist_unhashed(&map->hn))
+			hlist_del_init(&map->hn);
 	}
 	if (map->flags == ADSP_MMAP_HEAP_ADDR ||
 				map->flags == ADSP_MMAP_REMOTE_HEAP_ADDR) {
@@ -1019,7 +1020,7 @@ static int fastrpc_mmap_create(struct fastrpc_file *fl, int fd,
 
 bail:
 	if (err && map)
-		fastrpc_mmap_free(map, 0);
+		fastrpc_mmap_free(map, 1);
 	return err;
 }
 
