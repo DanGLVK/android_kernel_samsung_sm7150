@@ -1087,8 +1087,16 @@ void adreno_profile_init(struct adreno_device *adreno_dev)
 
 void adreno_profile_close(struct adreno_device *adreno_dev)
 {
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_profile *profile = &adreno_dev->profile;
 	struct adreno_profile_assigns_list *entry, *tmp;
+
+	/*
+	 * Serialize against the debugfs readers (pipe/assignments): they
+	 * hold device->mutex while dereferencing the log buffer, the
+	 * shared buffer and the assignments list
+	 */
+	mutex_lock(&device->mutex);
 
 	profile->enabled = false;
 	vfree(profile->log_buffer);
@@ -1106,6 +1114,8 @@ void adreno_profile_close(struct adreno_device *adreno_dev)
 		list_del(&entry->list);
 		kfree(entry);
 	}
+
+	mutex_unlock(&device->mutex);
 }
 
 int adreno_profile_process_results(struct adreno_device *adreno_dev)
