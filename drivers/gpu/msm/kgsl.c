@@ -3215,7 +3215,7 @@ long kgsl_ioctl_map_user_mem(struct kgsl_device_private *dev_priv,
 	else if (entry->memdesc.size >= SZ_1M)
 		kgsl_memdesc_set_align(&entry->memdesc, ilog2(SZ_1M));
 	else if (entry->memdesc.size >= SZ_64K)
-		kgsl_memdesc_set_align(&entry->memdesc, ilog2(SZ_64));
+		kgsl_memdesc_set_align(&entry->memdesc, ilog2(SZ_64K));
 
 	/* echo back flags */
 	param->flags = (unsigned int) entry->memdesc.flags;
