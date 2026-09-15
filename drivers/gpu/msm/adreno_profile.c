@@ -572,6 +572,10 @@ static ssize_t profile_assignments_read(struct file *filep,
 		len = snprintf(pos, max_size, ASSIGNS_STR_FORMAT,
 				entry->name, entry->countable);
 
+		/* Stop before the accounting underflows and walks off buf */
+		if (len < 0 || len >= max_size)
+			break;
+
 		max_size -= len;
 		pos += len;
 	}
