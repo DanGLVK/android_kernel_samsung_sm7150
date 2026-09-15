@@ -452,8 +452,12 @@ static int drawobj_add_sync_timestamp(struct kgsl_device *device,
 {
 	struct kgsl_cmd_syncpoint_timestamp *sync = priv;
 	struct kgsl_drawobj *drawobj = DRAWOBJ(syncobj);
-	struct kgsl_context *context = kgsl_context_get(device,
-		sync->context_id);
+	/*
+	 * Use the owner-validated lookup: a caller must not be able to
+	 * register syncpoints against another process's context
+	 */
+	struct kgsl_context *context = kgsl_context_get_owner(
+		drawobj->context->dev_priv, sync->context_id);
 	struct kgsl_drawobj_sync_event *event;
 	int ret = -EINVAL;
 	unsigned int id;
