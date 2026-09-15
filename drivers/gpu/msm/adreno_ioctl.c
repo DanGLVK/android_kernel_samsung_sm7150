@@ -207,6 +207,9 @@ long adreno_ioctl_helper(struct kgsl_device_private *dev_priv,
 	if (i == len)
 		return -ENOIOCTLCMD;
 
+	if (_IOC_TYPE(cmd) != _IOC_TYPE(cmds[i].cmd))
+		return -ENOIOCTLCMD;
+
 	if (WARN_ON(_IOC_SIZE(cmds[i].cmd) > sizeof(data))) {
 		if (__ratelimit(&_rs))
 			WARN(1, "data too big for ioctl 0x%08X: %d/%zu\n",
