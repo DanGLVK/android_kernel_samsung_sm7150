@@ -2021,14 +2021,31 @@ static int _map_to_one_page(struct kgsl_pagetable *pt, uint64_t addr,
 	if (pages == NULL)
 		return -ENOMEM;
 
-	for (i = 0; i < count; i++) {
-		if (pg_sz != PAGE_SIZE) {
-			struct page *tmp_page = page;
-			int j;
+	/*
+	 * If the physical memory is composed of pages larger than PAGE_SIZE,
+	 * walk the subpages of the physical page for every chunk in the
+	 * mapping.  nth_page() must be used here: plain pointer arithmetic on
+	 * struct page pointers (tmp_page += PAGE_SIZE) advances
+	 * PAGE_SIZE * sizeof(struct page) entries and maps completely
+	 * unrelated physical memory into the GPU pagetable.
+	 */
+	if (pg_sz != PAGE_SIZE) {
+		int subpages = pg_sz >> PAGE_SHIFT;
+		int chunks;
+		int j;
 
-			for (j = 0; j < 16; j++, tmp_page += PAGE_SIZE)
-				pages[i++] = tmp_page;
-		} else
+		if (subpages == 0 || count % subpages != 0) {
+			kfree(pages);
+			return -EINVAL;
+		}
+
+		chunks = count / subpages;
+
+		for (i = 0; i < chunks; i++)
+			for (j = 0; j < subpages; j++)
+				pages[i * subpages + j] = nth_page(page, j);
+	} else {
+		for (i = 0; i < count; i++)
 			pages[i] = page;
 	}
 
