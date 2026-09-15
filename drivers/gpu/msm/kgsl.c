@@ -4165,7 +4165,20 @@ static long sparse_unbind_range(struct kgsl_sparse_binding_object *obj,
 		}
 
 		if (bind_obj->v_off > offset) {
-			tmp_size = size - bind_obj->v_off - offset;
+			/*
+			 * The bind object starts inside the unbind range: the
+			 * overlap is what remains after skipping the bytes
+			 * before the bind object.  Compute it without
+			 * underflowing (size - v_off - offset wraps).
+			 */
+			uint64_t lead = bind_obj->v_off - offset;
+
+			if (lead >= size) {
+				spin_unlock(&virt_entry->bind_lock);
+				return -EINVAL;
+			}
+
+			tmp_size = size - lead;
 			if (tmp_size > bind_obj->size)
 				tmp_size = bind_obj->size;
 			offset = bind_obj->v_off;
