@@ -729,7 +729,7 @@ static int ib_parse_set_draw_state(struct kgsl_device *device,
 	 * packet header. In each loop we look at 2 DWORDS hence increment
 	 * loop counter by 2 always
 	 */
-	for (i = 1; i <= size; i += 2) {
+	for (i = 1; i + 1 <= size; i += 2) {
 		grp_id = (ptr[i] & 0x1F000000) >> 24;
 		/* take action based on flags */
 		flags = (ptr[i] & 0x000F0000) >> 16;
