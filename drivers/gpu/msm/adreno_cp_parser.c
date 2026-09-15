@@ -670,7 +670,7 @@ static int ib_parse_type7_set_draw_state(struct kgsl_device *device,
 	 * packet header. In each loop we look at 3 DWORDS hence increment
 	 * loop counter by 3 always
 	 */
-	for (i = 1; i <= size; i += 3) {
+	for (i = 1; i + 2 <= size; i += 3) {
 		grp_id = (ptr[i] & 0x1F000000) >> 24;
 		/* take action based on flags */
 		flags = (ptr[i] & 0x000F0000) >> 16;
