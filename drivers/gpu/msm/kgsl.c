@@ -3488,6 +3488,12 @@ long kgsl_ioctl_gpuobj_sync(struct kgsl_device_private *dev_priv,
 		if (ret)
 			goto out;
 
+		/*
+		 * Advance the user pointer unconditionally - a missing ID
+		 * must not stall the walk and swallow later entries
+		 */
+		ptr += sizeof(*objs);
+
 		entries[i] = kgsl_sharedmem_find_id(private, objs[i].id);
 
 		/* Not finding the ID is not a fatal failure - just skip it */
@@ -3504,8 +3510,6 @@ long kgsl_ioctl_gpuobj_sync(struct kgsl_device_private *dev_priv,
 			trace_kgsl_mem_sync_full_cache(i, size);
 			goto out;
 		}
-
-		ptr += sizeof(*objs);
 	}
 
 	for (i = 0; !ret && i < param->count; i++)
