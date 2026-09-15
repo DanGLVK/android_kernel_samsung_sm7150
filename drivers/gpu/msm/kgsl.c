@@ -2243,6 +2243,25 @@ long gpumem_free_entry(struct kgsl_mem_entry *entry)
 	if (!kgsl_mem_entry_set_pend(entry))
 		return -EBUSY;
 
+	/*
+	 * A sparse physical object that still has active bindings or a
+	 * sparse virtual object that still has bind tree entries cannot be
+	 * freed.  Freeing either one leaves a dangling p_memdesc pointer in
+	 * the bind tree of its peer object.
+	 *
+	 * NB: no kgsl_mem_entry_put() here — the caller drops the find
+	 * reference after we return, which is the single put this path
+	 * performs (mirrors kgsl_ioctl_sparse_phys_free). Putting again
+	 * would destroy the entry we just refused to free.
+	 */
+	if (((entry->memdesc.flags & KGSL_MEMFLAGS_SPARSE_PHYS) &&
+			entry->memdesc.cur_bindings != 0) ||
+			((entry->memdesc.flags & KGSL_MEMFLAGS_SPARSE_VIRT) &&
+			entry->bind_tree.rb_node != NULL)) {
+		kgsl_mem_entry_unset_pend(entry);
+		return -EINVAL;
+	}
+
 	trace_kgsl_mem_free(entry);
 	kgsl_memfree_add(pid_nr(entry->priv->pid),
 			entry->memdesc.pagetable ?
@@ -2285,6 +2304,15 @@ static long gpumem_free_entry_on_timestamp(struct kgsl_device *device,
 
 	if (!kgsl_mem_entry_set_pend(entry))
 		return -EBUSY;
+
+	/* Same sparse restrictions as gpumem_free_entry() */
+	if (((entry->memdesc.flags & KGSL_MEMFLAGS_SPARSE_PHYS) &&
+			entry->memdesc.cur_bindings != 0) ||
+			((entry->memdesc.flags & KGSL_MEMFLAGS_SPARSE_VIRT) &&
+			entry->bind_tree.rb_node != NULL)) {
+		kgsl_mem_entry_unset_pend(entry);
+		return -EINVAL;
+	}
 
 	kgsl_readtimestamp(device, context, KGSL_TIMESTAMP_RETIRED, &temp);
 	trace_kgsl_mem_timestamp_queue(device, entry, context->id, temp,
