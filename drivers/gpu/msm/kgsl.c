@@ -4726,6 +4726,12 @@ get_mmap_entry(struct kgsl_process_private *private,
 		goto err_put;
 	}
 
+	/* Secure buffers are owned by TrustZone - never map them to the CPU */
+	if (entry->memdesc.flags & KGSL_MEMFLAGS_SECURE) {
+		ret = -EPERM;
+		goto err_put;
+	}
+
 	if (kgsl_memdesc_use_cpu_map(&entry->memdesc)) {
 		if (len != kgsl_memdesc_footprint(&entry->memdesc)) {
 			ret = -ERANGE;
