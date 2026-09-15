@@ -188,6 +188,9 @@ static int ib_save_mip_addresses(unsigned int *pkt,
 	block = (pkt[1] >> 19) & 0x07;
 	type = pkt[2] & 0x03;
 
+	if (block >= ARRAY_SIZE(load_state_unit_sizes))
+		return 0;
+
 	if (type == 0)
 		unitsize = load_state_unit_sizes[block][0];
 	else
