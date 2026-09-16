@@ -2214,6 +2214,7 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 	char *proc_name = NULL;
 	int unsigned_request = (uproc->attrs & FASTRPC_MODE_UNSIGNED_MODULE);
 	int cid = fl->cid;
+	int staticpd_set = 0;
 	struct fastrpc_channel_ctx *chan = &me->channel[cid];
 
 	VERIFY(err, cid >= ADSP_DOMAIN_ID && cid < NUM_CHANNELS);
@@ -2443,6 +2444,7 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 				}
 			}
 			me->staticpd_flags = 1;
+			staticpd_set = 1;
 		}
 		mutex_unlock(&me->staticpd_mutex);
 
@@ -2478,7 +2480,8 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 	fl->dsp_proc_init = 1;
 bail:
 	kfree(proc_name);
-	if (err && (init->flags == FASTRPC_INIT_CREATE_STATIC)) {
+	if (err && staticpd_set &&
+			(init->flags == FASTRPC_INIT_CREATE_STATIC)) {
 		mutex_lock(&me->staticpd_mutex);
 		me->staticpd_flags = 0;
 		mutex_unlock(&me->staticpd_mutex);
