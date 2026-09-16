@@ -3781,7 +3781,7 @@ static int fastrpc_set_process_info(struct fastrpc_file *fl)
 		}
 		snprintf(fl->debug_buf, buf_size, "%.10s%s%d",
 			cur_comm, "_", current->pid);
-		fl->debugfs_file = debugfs_create_file(fl->debug_buf, 0644,
+		fl->debugfs_file = debugfs_create_file(fl->debug_buf, 0400,
 			debugfs_root, fl, &debugfs_fops);
 		if (IS_ERR_OR_NULL(fl->debugfs_file)) {
 			pr_warn("Error: %s: %s: failed to create debugfs file %s\n",
@@ -4482,7 +4482,7 @@ static int fastrpc_cb_probe(struct device *dev)
 
 	chan->sesscount++;
 	if (debugfs_root) {
-		debugfs_global_file = debugfs_create_file("global", 0644,
+		debugfs_global_file = debugfs_create_file("global", 0400,
 			debugfs_root, NULL, &debugfs_fops);
 		if (IS_ERR_OR_NULL(debugfs_global_file)) {
 			pr_warn("Error: %s: %s: failed to create debugfs global file\n",
