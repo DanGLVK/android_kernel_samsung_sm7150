@@ -3044,6 +3044,21 @@ static int fastrpc_internal_mmap(struct fastrpc_file *fl,
 		err = -EBADR;
 		return err;
 	}
+	/*
+	 * ADSP_MMAP_HEAP_ADDR makes the kernel hand the buffer to
+	 * TrustZone (scm_call2, PIL protect/clear) and
+	 * ADSP_MMAP_REMOTE_HEAP_ADDR reassigns it to a protected VM via
+	 * hyp_assign_phys(). These are privileged operations: only the
+	 * secure device node may use them, never applications that
+	 * opened the non-secure (untrusted) device node.
+	 */
+	if ((ud->flags == ADSP_MMAP_HEAP_ADDR ||
+			ud->flags == ADSP_MMAP_REMOTE_HEAP_ADDR) &&
+			fl->dev_minor != MINOR_NUM_SECURE_DEV) {
+		pr_err("adsprpc: ERROR: %s: user application %s trying to use privileged map flags 0x%x on non-secure device node\n",
+			__func__, current->comm, ud->flags);
+		return -EACCES;
+	}
 	mutex_lock(&fl->internal_map_mutex);
 	if (ud->flags == ADSP_MMAP_ADD_PAGES) {
 		if (ud->vaddrin) {
