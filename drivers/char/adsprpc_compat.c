@@ -155,7 +155,7 @@ struct compat_fastrpc_ioctl_dsp_capabilities {
 static int compat_get_fastrpc_ioctl_invoke(
 			struct compat_fastrpc_ioctl_invoke_crc __user *inv32,
 			struct fastrpc_ioctl_invoke_crc __user **inva,
-			unsigned int cmd)
+			unsigned int cmd, uint32_t *sclep)
 {
 	compat_uint_t u, sc;
 	compat_size_t s;
@@ -210,6 +210,7 @@ static int compat_get_fastrpc_ioctl_invoke(
 		err |= put_user(p, (compat_uptr_t __user *)&inv->crc);
 	}
 
+	*sclep = (uint32_t)sc;
 	*inva = inv;
 	return err;
 }
@@ -455,14 +456,14 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 	{
 		struct compat_fastrpc_ioctl_invoke_crc __user *inv32;
 		struct fastrpc_ioctl_invoke_crc __user *inv;
+		uint32_t expect_sc = 0;
 
 		inv32 = compat_ptr(arg);
 		VERIFY(err, 0 == compat_get_fastrpc_ioctl_invoke(inv32,
-							&inv, cmd));
+							&inv, cmd, &expect_sc));
 		if (err)
 			return err;
-		return filp->f_op->unlocked_ioctl(filp,
-				FASTRPC_IOCTL_INVOKE_CRC, (unsigned long)inv);
+		return fastrpc_invoke_from_compat(filp, inv, expect_sc);
 	}
 	case COMPAT_FASTRPC_IOCTL_MMAP:
 	{

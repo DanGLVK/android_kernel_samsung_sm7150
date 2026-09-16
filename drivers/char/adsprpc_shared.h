@@ -341,4 +341,8 @@ enum fastrpc_proc_attr {
 	FASTRPC_MODE_SYSTEM_PROCESS		= 1 << 5,
 };
 
+struct file;
+int fastrpc_invoke_from_compat(struct file *file,
+	struct fastrpc_ioctl_invoke_crc __user *uinv, uint32_t expect_sc);
+
 #endif

@@ -4093,6 +4093,57 @@ bail:
 	return err;
 }
 
+/*
+ * Compat invoke entry point. The compat layer translates the 32-bit
+ * ioctl structure into a 64-bit fastrpc_ioctl_invoke_crc that lives
+ * in a compat_alloc_user_space() scratch buffer, so every field of
+ * that structure - including the scalar value that sizes the
+ * translated argument array - stays writable by the application
+ * until it is copied into kernel memory. Fetch the structure exactly
+ * once, fail if the scalar value no longer matches the translated
+ * one, and run the invocation from the kernel-side copy.
+ */
+int fastrpc_invoke_from_compat(struct file *file,
+	struct fastrpc_ioctl_invoke_crc __user *uinv, uint32_t expect_sc)
+{
+	struct fastrpc_ioctl_invoke_crc kinv;
+	struct fastrpc_file *fl = (struct fastrpc_file *)file->private_data;
+	struct fastrpc_apps *me = &gfa;
+	int err = 0, session = 0;
+
+	if (fl->spdname &&
+		!strcmp(fl->spdname, AUDIO_PDR_SERVICE_LOCATION_CLIENT_NAME)) {
+		VERIFY(err, !fastrpc_get_adsp_session(
+			AUDIO_PDR_SERVICE_LOCATION_CLIENT_NAME, &session));
+		if (err)
+			goto bail;
+		if (!me->channel[fl->cid].spd[session].ispdup) {
+			err = -ENOTCONN;
+			goto bail;
+		}
+	}
+	spin_lock(&fl->hlock);
+	if (fl->file_close == 1) {
+		err = -EBADF;
+		pr_warn("ADSPRPC: fastrpc_device_release is happening, So not sending any new requests to DSP");
+		spin_unlock(&fl->hlock);
+		goto bail;
+	}
+	spin_unlock(&fl->hlock);
+
+	if (copy_from_user(&kinv, (void __user *)uinv, sizeof(kinv))) {
+		err = -EFAULT;
+		goto bail;
+	}
+	if (kinv.inv.sc != expect_sc) {
+		err = -EFAULT;
+		goto bail;
+	}
+	return fastrpc_internal_invoke(fl, fl->mode, 0, &kinv);
+bail:
+	return err;
+}
+
 static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 				 unsigned long ioctl_param)
 {
