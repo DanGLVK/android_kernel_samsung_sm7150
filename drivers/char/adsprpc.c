@@ -2156,7 +2156,7 @@ bail:
 	else if (ctx)
 		context_free(ctx);
 	if (fl->ssrcount != fl->apps->channel[cid].ssrcount)
-		err = ECONNRESET;
+		err = -ECONNRESET;
 
 	if (fl->profile && !interrupted) {
 		if (invoke->handle != FASTRPC_STATIC_HANDLE_LISTENER) {
@@ -4186,7 +4186,7 @@ static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 	}
 	spin_lock(&fl->hlock);
 	if (fl->file_close == 1) {
-		err = EBADF;
+		err = -EBADF;
 		pr_warn("ADSPRPC: fastrpc_device_release is happening, So not sending any new requests to DSP");
 		spin_unlock(&fl->hlock);
 		goto bail;
