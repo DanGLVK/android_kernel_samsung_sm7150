@@ -2080,6 +2080,8 @@ static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 			FASTRPC_STATIC_HANDLE_PROCESS_GROUP);
 		VERIFY(err, invoke->handle !=
 			FASTRPC_STATIC_HANDLE_DSP_UTILITIES);
+		VERIFY(err, invoke->handle !=
+			FASTRPC_STATIC_HANDLE_LISTENER);
 		if (err) {
 			pr_err("adsprpc: ERROR: %s: user application %s trying to send a kernel RPC message to channel %d, handle 0x%x\n",
 				__func__, current->comm, cid, invoke->handle);
