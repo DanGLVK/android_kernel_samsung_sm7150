@@ -3212,6 +3212,7 @@ static int fastrpc_rpmsg_callback(struct rpmsg_device *rpdev, void *data,
 {
 	struct smq_invoke_rsp *rsp = (struct smq_invoke_rsp *)data;
 	struct fastrpc_apps *me = &gfa;
+	struct smq_invoke_ctx *ctx;
 	uint32_t index;
 	int err = 0;
 
@@ -3224,16 +3225,22 @@ static int fastrpc_rpmsg_callback(struct rpmsg_device *rpdev, void *data,
 	if (err)
 		goto bail;
 
-	VERIFY(err, !IS_ERR_OR_NULL(me->ctxtable[index]));
+	/*
+	 * Hold ctxlock across the lookup, validation and notification:
+	 * context_free() clears the ctxtable slot under the same lock,
+	 * so a context can no longer be freed and its slot reused
+	 * between the check and the dereference (UAF/TOCTOU).
+	 */
+	spin_lock(&me->ctxlock);
+	ctx = me->ctxtable[index];
+	if (ctx && ((ctx->ctxid == (rsp->ctx & ~3)) &&
+			ctx->magic == FASTRPC_CTX_MAGIC))
+		context_notify_user(ctx, rsp->retval);
+	else
+		err = -EINVAL;
+	spin_unlock(&me->ctxlock);
 	if (err)
 		goto bail;
-
-	VERIFY(err, ((me->ctxtable[index]->ctxid == (rsp->ctx & ~3)) &&
-		me->ctxtable[index]->magic == FASTRPC_CTX_MAGIC));
-	if (err)
-		goto bail;
-
-	context_notify_user(me->ctxtable[index], rsp->retval);
 bail:
 	if (err)
 		pr_debug("adsprpc: invalid response or context\n");
