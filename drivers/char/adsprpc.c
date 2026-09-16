@@ -16,6 +16,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/completion.h>
+#include <linux/refcount.h>
 #include <linux/pagemap.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
@@ -402,6 +403,8 @@ struct fastrpc_file {
 	struct fastrpc_apps *apps;
 	struct hlist_head perf;
 	struct dentry *debugfs_file;
+	/* 1 ref for the open fd, +1 per open per-process debugfs file */
+	refcount_t refs;
 	struct mutex perf_mutex;
 	struct pm_qos_request pm_qos_req;
 	int qos_request;
@@ -3267,7 +3270,7 @@ static void fastrpc_session_free(struct fastrpc_channel_ctx *chan,
 	mutex_unlock(&chan->smd_mutex);
 }
 
-static int fastrpc_file_free(struct fastrpc_file *fl)
+static void fastrpc_file_destroy(struct fastrpc_file *fl)
 {
 	struct hlist_node *n = NULL;
 	struct fastrpc_mmap *map = NULL, *lmap = NULL;
@@ -3275,19 +3278,16 @@ static int fastrpc_file_free(struct fastrpc_file *fl)
 	int cid;
 
 	if (!fl)
-		return 0;
+		return;
 	cid = fl->cid;
 
 	(void)fastrpc_release_current_dsp_process(fl);
 
-	spin_lock(&fl->apps->hlock);
-	hlist_del_init(&fl->hn);
-	spin_unlock(&fl->apps->hlock);
 	kfree(fl->debug_buf);
 
 	if (!fl->sctx) {
 		kfree(fl);
-		return 0;
+		return;
 	}
 	spin_lock(&fl->hlock);
 	fl->file_close = 1;
@@ -3332,6 +3332,37 @@ static int fastrpc_file_free(struct fastrpc_file *fl)
 	mutex_destroy(&fl->internal_map_mutex);
 	mutex_destroy(&fl->pm_qos_mutex);
 	kfree(fl);
+}
+
+static void fastrpc_file_put(struct fastrpc_file *fl)
+{
+	struct fastrpc_apps *me = &gfa;
+	bool dead = false;
+
+	/*
+	 * Drop the last reference under the global lock so a concurrent
+	 * fastrpc_debugfs_open() can never resurrect the file after
+	 * the refcount reached zero (it would then use freed memory).
+	 * The destruction itself runs outside the lock.
+	 */
+	spin_lock(&me->hlock);
+	if (refcount_dec_and_test(&fl->refs))
+		dead = true;
+	spin_unlock(&me->hlock);
+	if (dead)
+		fastrpc_file_destroy(fl);
+}
+
+static int fastrpc_file_free(struct fastrpc_file *fl)
+{
+	if (!fl)
+		return 0;
+
+	spin_lock(&fl->apps->hlock);
+	hlist_del_init(&fl->hn);
+	spin_unlock(&fl->apps->hlock);
+
+	fastrpc_file_put(fl);
 	return 0;
 }
 
@@ -3352,7 +3383,34 @@ static int fastrpc_device_release(struct inode *inode, struct file *file)
 
 static int fastrpc_debugfs_open(struct inode *inode, struct file *filp)
 {
-	filp->private_data = inode->i_private;
+	struct fastrpc_apps *me = &gfa;
+	struct fastrpc_file *fl = inode->i_private;
+	int err = 0;
+
+	/*
+	 * The global debugfs file carries no fastrpc_file. For the
+	 * per-process files take a reference on fl so it cannot be
+	 * freed (device close) while this debugfs fd is still open.
+	 * The last refcount drop happens under me->hlock, see
+	 * fastrpc_file_put().
+	 */
+	if (fl) {
+		spin_lock(&me->hlock);
+		if (!refcount_inc_not_zero(&fl->refs))
+			err = -ENODEV;
+		spin_unlock(&me->hlock);
+	}
+	if (!err)
+		filp->private_data = fl;
+	return err;
+}
+
+static int fastrpc_debugfs_release(struct inode *inode, struct file *filp)
+{
+	struct fastrpc_file *fl = filp->private_data;
+
+	if (fl)
+		fastrpc_file_put(fl);
 	return 0;
 }
 
@@ -3588,6 +3646,7 @@ bail:
 static const struct file_operations debugfs_fops = {
 	.open = fastrpc_debugfs_open,
 	.read = fastrpc_debugfs_read,
+	.release = fastrpc_debugfs_release,
 };
 
 static int fastrpc_channel_open(struct fastrpc_file *fl)
@@ -3674,6 +3733,7 @@ static int fastrpc_device_open(struct inode *inode, struct file *filp)
 	INIT_HLIST_HEAD(&fl->remote_bufs);
 	INIT_HLIST_NODE(&fl->hn);
 	fl->sessionid = 0;
+	refcount_set(&fl->refs, 1);
 	fl->apps = me;
 	fl->mode = FASTRPC_MODE_SERIAL;
 	fl->cid = -1;
