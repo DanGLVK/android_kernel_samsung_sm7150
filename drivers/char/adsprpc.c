@@ -2214,6 +2214,14 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 	int cid = fl->cid;
 	struct fastrpc_channel_ctx *chan = &me->channel[cid];
 
+	VERIFY(err, cid >= ADSP_DOMAIN_ID && cid < NUM_CHANNELS);
+	if (err) {
+		err = -ECHRNG;
+		pr_err("adsprpc: %s: INIT on file with unbound channel (cid %d)\n",
+			__func__, cid);
+		goto bail;
+	}
+
 	if (chan->unsigned_support &&
 		fl->dev_minor == MINOR_NUM_DEV) {
 		/* Make sure third party applications */
