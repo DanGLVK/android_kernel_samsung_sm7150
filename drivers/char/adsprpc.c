@@ -3804,6 +3804,7 @@ static int fastrpc_get_info(struct fastrpc_file *fl, uint32_t *info)
 {
 	int err = 0;
 	uint32_t cid;
+	int reserved = 0;
 	struct fastrpc_apps *me = &gfa;
 
 	VERIFY(err, fl != NULL);
@@ -3836,14 +3837,37 @@ static int fastrpc_get_info(struct fastrpc_file *fl, uint32_t *info)
 				goto bail;
 			}
 		}
-		fl->cid = cid;
-		fl->ssrcount = fl->apps->channel[cid].ssrcount;
-		mutex_lock(&fl->apps->channel[cid].smd_mutex);
-		err = fastrpc_session_alloc_locked(&fl->apps->channel[cid],
-				0, &fl->sctx);
-		mutex_unlock(&fl->apps->channel[cid].smd_mutex);
-		if (err)
-			goto bail;
+		/*
+		 * Atomically reserve the channel under the file lock:
+		 * two threads of the same process could otherwise both
+		 * pass the fl->cid == -1 check and each allocate an SMMU
+		 * session, overwriting fl->sctx and leaking one session
+		 * of the fixed per-channel pool for good. The thread
+		 * that performs the reservation does the allocation and
+		 * releases the reservation if it fails.
+		 */
+		spin_lock(&fl->hlock);
+		if (fl->cid == -1) {
+			fl->cid = cid;
+			reserved = true;
+		}
+		spin_unlock(&fl->hlock);
+
+		if (reserved) {
+			fl->ssrcount = fl->apps->channel[cid].ssrcount;
+			mutex_lock(&fl->apps->channel[cid].smd_mutex);
+			err = fastrpc_session_alloc_locked(
+					&fl->apps->channel[cid], 0,
+					&fl->sctx);
+			mutex_unlock(&fl->apps->channel[cid].smd_mutex);
+			if (err) {
+				spin_lock(&fl->hlock);
+				if (fl->cid == cid)
+					fl->cid = -1;
+				spin_unlock(&fl->hlock);
+				goto bail;
+			}
+		}
 	}
 	VERIFY(err, fl->sctx != NULL);
 	if (err) {
