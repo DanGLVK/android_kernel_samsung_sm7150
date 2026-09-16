@@ -1595,10 +1595,22 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 		VERIFY(err, (mend - mstart) <= LONG_MAX);
 		if (err)
 			goto bail;
-		copylen += mend - mstart;
-		VERIFY(err, copylen >= 0);
-		if (err)
+		/*
+		 * Overflow-guard the accumulation: copylen sizes
+		 * the kernel buffer and feeds rlen = copylen -
+		 * metalen. A wrapped-around copylen would undersize
+		 * ctx->buf, wrap rlen to a huge value, bypass the
+		 * remaining checks and turn copy_from_user() into
+		 * a controlled kernel heap overflow. Cap the total
+		 * at MAX_SIZE_LIMIT, consistent with
+		 * dma_alloc_memory().
+		 */
+		if ((mend - mstart) > MAX_SIZE_LIMIT ||
+		    copylen > MAX_SIZE_LIMIT - (mend - mstart)) {
+			err = -EOVERFLOW;
 			goto bail;
+		}
+		copylen += mend - mstart;
 	}
 	ctx->used = copylen;
 
@@ -1701,6 +1713,10 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 
 	/* copy non ion buffers */
 	PERF(ctx->fl->profile, GET_COUNTER(perf_counter, PERF_COPY),
+	if (copylen < metalen) {
+		err = -EOVERFLOW;
+		goto bail;
+	}
 	rlen = copylen - metalen;
 	for (oix = 0; rpra && lrpra && oix < inbufs + outbufs; ++oix) {
 		int i = ctx->overps[oix]->raix;
