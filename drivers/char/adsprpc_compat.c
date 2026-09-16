@@ -473,8 +473,8 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 		uint32_t expect_sc = 0;
 
 		inv32 = compat_ptr(arg);
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_invoke(inv32,
-							&inv, cmd, &expect_sc));
+		err = compat_get_fastrpc_ioctl_invoke(inv32, &inv, cmd,
+						&expect_sc);
 		if (err)
 			return err;
 		return fastrpc_invoke_from_compat(filp, inv, expect_sc);
@@ -490,14 +490,14 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 							sizeof(*map))));
 		if (err)
 			return -EFAULT;
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_mmap(map32, map));
+		err = compat_get_fastrpc_ioctl_mmap(map32, map);
 		if (err)
 			return err;
 		ret = filp->f_op->unlocked_ioctl(filp, FASTRPC_IOCTL_MMAP,
 							(unsigned long)map);
 		if (ret)
 			return ret;
-		VERIFY(err, 0 == compat_put_fastrpc_ioctl_mmap(map32, map));
+		err = compat_put_fastrpc_ioctl_mmap(map32, map);
 		return err;
 	}
 	case COMPAT_FASTRPC_IOCTL_MMAP_64:
@@ -511,14 +511,14 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 							sizeof(*map))));
 		if (err)
 			return -EFAULT;
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_mmap_64(map32, map));
+		err = compat_get_fastrpc_ioctl_mmap_64(map32, map);
 		if (err)
 			return err;
 		ret = filp->f_op->unlocked_ioctl(filp, FASTRPC_IOCTL_MMAP_64,
 							(unsigned long)map);
 		if (ret)
 			return ret;
-		VERIFY(err, 0 == compat_put_fastrpc_ioctl_mmap_64(map32, map));
+		err = compat_put_fastrpc_ioctl_mmap_64(map32, map);
 		return err;
 	}
 	case COMPAT_FASTRPC_IOCTL_MUNMAP:
@@ -531,8 +531,7 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 							sizeof(*unmap))));
 		if (err)
 			return -EFAULT;
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_munmap(unmap32,
-							unmap));
+		err = compat_get_fastrpc_ioctl_munmap(unmap32, unmap);
 		if (err)
 			return err;
 		return filp->f_op->unlocked_ioctl(filp, FASTRPC_IOCTL_MUNMAP,
@@ -548,8 +547,7 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 							sizeof(*unmap))));
 		if (err)
 			return -EFAULT;
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_munmap_64(unmap32,
-							unmap));
+		err = compat_get_fastrpc_ioctl_munmap_64(unmap32, unmap);
 		if (err)
 			return err;
 		return filp->f_op->unlocked_ioctl(filp, FASTRPC_IOCTL_MUNMAP_64,
@@ -567,8 +565,7 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 							sizeof(*init))));
 		if (err)
 			return -EFAULT;
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_init(init32,
-							init, cmd));
+		err = compat_get_fastrpc_ioctl_init(init32, init, cmd);
 		if (err)
 			return err;
 		return filp->f_op->unlocked_ioctl(filp,
@@ -613,8 +610,7 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 							sizeof(*ctrl))));
 		if (err)
 			return -EFAULT;
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_control(ctrl32,
-							ctrl));
+		err = compat_get_fastrpc_ioctl_control(ctrl32, ctrl);
 		if (err)
 			return err;
 		err = filp->f_op->unlocked_ioctl(filp, FASTRPC_IOCTL_CONTROL,
@@ -642,8 +638,7 @@ long compat_fastrpc_device_ioctl(struct file *filp, unsigned int cmd,
 							sizeof(*perf))));
 		if (err)
 			return -EFAULT;
-		VERIFY(err, 0 == compat_get_fastrpc_ioctl_perf(perf32,
-							perf));
+		err = compat_get_fastrpc_ioctl_perf(perf32, perf);
 		if (err)
 			return err;
 		ret = filp->f_op->unlocked_ioctl(filp, FASTRPC_IOCTL_GETPERF,
