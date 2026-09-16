@@ -4565,8 +4565,14 @@ static int fastrpc_cb_probe(struct device *dev)
 		if (err)
 			goto bail;
 
+		/*
+		 * sesscount is used as the index *after* it is
+		 * incremented below; require room for one more entry so
+		 * the index can never reach NUM_SESSIONS.
+		 */
 		for (index = 1; index < num_indices &&
-				chan->sesscount < NUM_SESSIONS; index++) {
+				chan->sesscount < (NUM_SESSIONS - 1);
+				index++) {
 			err = of_parse_phandle_with_args(dev->of_node, "iommus",
 					"#iommu-cells", index, &iommuspec);
 			if (err) {
@@ -4592,7 +4598,8 @@ static int fastrpc_cb_probe(struct device *dev)
 			struct fastrpc_session_ctx *dup_sess;
 
 			for (j = 1; j < sharedcb_count &&
-					chan->sesscount < NUM_SESSIONS; j++) {
+					chan->sesscount < (NUM_SESSIONS - 1);
+					j++) {
 				chan->sesscount++;
 				dup_sess = &chan->session[chan->sesscount];
 				memcpy(dup_sess, sess,
