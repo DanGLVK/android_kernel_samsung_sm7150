@@ -312,6 +312,8 @@ struct fastrpc_apps {
 	struct smq_phy_page range;
 	struct hlist_head maps;
 	uint32_t staticpd_flags;
+	/* Serializes the staticpd_flags check-and-set for static PDs */
+	struct mutex staticpd_mutex;
 	dev_t dev_no;
 	int compat;
 	struct hlist_head drivers;
@@ -1998,6 +2000,7 @@ static void fastrpc_init(struct fastrpc_apps *me)
 	INIT_HLIST_HEAD(&me->maps);
 	spin_lock_init(&me->hlock);
 	spin_lock_init(&me->ctxlock);
+	mutex_init(&me->staticpd_mutex);
 	me->channel = &gcinfo[0];
 	for (i = 0; i < NUM_CHANNELS; i++) {
 		init_completion(&me->channel[i].work);
@@ -2391,6 +2394,13 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 				goto bail;
 		}
 
+		/*
+		 * Check and set staticpd_flags atomically: two
+		 * applications creating static PDs concurrently could
+		 * otherwise both pass the check, double-map the remote
+		 * heap and race the hypervisor ownership assignment.
+		 */
+		mutex_lock(&me->staticpd_mutex);
 		if (!me->staticpd_flags && !(me->legacy_remote_heap)) {
 			inbuf.pageslen = 1;
 			mutex_lock(&fl->map_mutex);
@@ -2400,8 +2410,10 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 			if (mem)
 				mem->is_filemap = true;
 			mutex_unlock(&fl->map_mutex);
-			if (err)
+			if (err) {
+				mutex_unlock(&me->staticpd_mutex);
 				goto bail;
+			}
 			fastrpc_mmap_add_global(mem);
 			phys = mem->phys;
 			size = mem->size;
@@ -2416,11 +2428,13 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 								 err);
 					pr_err("map->phys 0x%llx, map->size %d\n",
 							 phys, (int)size);
+					mutex_unlock(&me->staticpd_mutex);
 					goto bail;
 				}
 			}
 			me->staticpd_flags = 1;
 		}
+		mutex_unlock(&me->staticpd_mutex);
 
 		ra[0].buf.pv = (void *)&inbuf;
 		ra[0].buf.len = sizeof(inbuf);
@@ -2454,8 +2468,11 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 	fl->dsp_proc_init = 1;
 bail:
 	kfree(proc_name);
-	if (err && (init->flags == FASTRPC_INIT_CREATE_STATIC))
+	if (err && (init->flags == FASTRPC_INIT_CREATE_STATIC)) {
+		mutex_lock(&me->staticpd_mutex);
 		me->staticpd_flags = 0;
+		mutex_unlock(&me->staticpd_mutex);
+	}
 	if (mem && err) {
 		if (mem->flags == ADSP_MMAP_REMOTE_HEAP_ADDR
 			&& me->channel[fl->cid].rhvm.vmid
