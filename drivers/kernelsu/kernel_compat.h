@@ -90,6 +90,22 @@ filp_open:
 #define ksu_grab_init_session_keyring() do { } while (0)
 #endif // KEYS && < 5.2
 
+static inline struct file *ksu_filp_open_nonotify(const char *path, int flags)
+{
+	struct path p;
+	struct file *f;
+	int ret;
+	unsigned int lookup_flags = (flags & O_NOFOLLOW) ? 0 : LOOKUP_FOLLOW;
+
+	ret = kern_path(path, lookup_flags, &p);
+	if (ret)
+		return ERR_PTR(ret);
+
+	f = dentry_open(&p, flags | __FMODE_NONOTIFY, current_cred());
+	path_put(&p);
+	return f;
+}
+
 #ifndef READ_ONCE
 #define READ_ONCE(x) (*(const volatile typeof(x) __may_alias *)&(x))
 #endif
