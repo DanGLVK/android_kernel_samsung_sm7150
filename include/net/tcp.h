@@ -725,6 +725,8 @@ static inline void tcp_set_ecn_low_from_dst(struct sock *sk,
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 
+	if (!dst)
+		return;
 	if (dst_feature(dst, RTAX_FEATURE_ECN_LOW))
 		tp->ecn_flags |= TCP_ECN_LOW;
 }
