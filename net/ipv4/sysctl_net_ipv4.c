@@ -78,8 +78,8 @@ static struct ctl_table plb_ctl_table_template[] = {
 		.maxlen         = sizeof(u8),
 		.mode           = 0644,
 		.proc_handler   = proc_dou8vec_minmax,
-		.extra1         = SYSCTL_ZERO,
-		.extra2         = SYSCTL_ONE,
+		.extra1         = &zero,
+		.extra2         = &one,
 	},
 	{
 		.procname       = "tcp_plb_idle_rehash_rounds",
@@ -106,7 +106,7 @@ static struct ctl_table plb_ctl_table_template[] = {
 		.maxlen         = sizeof(int),
 		.mode           = 0644,
 		.proc_handler   = proc_dointvec_minmax,
-		.extra1         = SYSCTL_ZERO,
+		.extra1         = &zero,
 		.extra2         = &tcp_plb_max_cong_thresh,
 	},
 	{ }
