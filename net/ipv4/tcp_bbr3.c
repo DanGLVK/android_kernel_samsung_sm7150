@@ -432,7 +432,7 @@ static u32 bbr_tso_segs_generic(struct sock *sk, unsigned int mss_now,
 
 	bytes = min_t(u32, bytes, gso_max_size - 1 - MAX_TCP_HEADER);
 	segs = max_t(u32, bytes / mss_now,
-		     sock_net(sk)->ipv4.sysctl_tcp_min_tso_segs);
+		     sysctl_tcp_min_tso_segs);
 	return segs;
 }
 
