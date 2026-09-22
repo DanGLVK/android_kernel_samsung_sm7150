@@ -65,9 +65,6 @@
 #include <linux/random.h>
 #include <linux/win_minmax.h>
 
-#include <trace/events/tcp.h>
-#include "tcp_dctcp.h"
-
 #define BBR_VERSION		3
 
 #define bbr_param(sk,name)	(bbr_ ## name)
@@ -466,13 +463,34 @@ static void bbr_save_cwnd(struct sock *sk)
 		bbr->prior_cwnd = max(bbr->prior_cwnd, tcp_snd_cwnd(tp));
 }
 
+/* 4.14 has no tcp_dctcp.h / dctcp_ece_ack_update(). BBRv3 only needs the
+ * CE-state tracking contract: ce_state reflects whether the most recent
+ * data was CE-marked, with rcv_nxt snapshotted on each change.
+ */
+static void bbr_ece_ack_update(struct sock *sk, enum tcp_ca_event evt,
+			       u32 *prior_rcv_nxt, u32 *ce_state)
+{
+	u32 new_ce_state;
+
+	if (evt == CA_EVENT_ECN_IS_CE)
+		new_ce_state = 1;
+	else if (evt == CA_EVENT_ECN_NO_CE)
+		new_ce_state = 0;
+	else
+		return;
+
+	if (new_ce_state != *ce_state) {
+		*ce_state = new_ce_state;
+		*prior_rcv_nxt = tcp_sk(sk)->rcv_nxt;
+	}
+}
+
 static void bbr3_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bbr3 *bbr = bbr3_get_priv(sk);
 
-	if (event == CA_EVENT_TX_START) {
-		if (!tp->app_limited)
+	if (event == CA_EVENT_TX_START) {		if (!tp->app_limited)
 			return;
 		bbr->idle_restart = 1;
 		bbr->ack_epoch_mstamp = tp->tcp_mstamp;
@@ -489,7 +507,7 @@ static void bbr3_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 		   bbr_can_use_ecn(sk) &&
 		   bbr_param(sk, precise_ece_ack)) {
 		u32 state = bbr->ce_state;
-		dctcp_ece_ack_update(sk, event, &bbr->prior_rcv_nxt, &state);
+		bbr_ece_ack_update(sk, event, &bbr->prior_rcv_nxt, &state);
 		bbr->ce_state = state;
 	} else if (event == CA_EVENT_TLP_RECOVERY &&
 		   bbr_param(sk, loss_probe_recovery)) {
