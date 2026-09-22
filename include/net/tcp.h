@@ -824,11 +824,6 @@ static inline u32 tcp_stamp32_us_delta(u32 t1, u32 t0)
 	return max_t(s32, t1 - t0, 0);
 }
 
-static inline u32 tcp_stamp32_us_delta(u32 t1, u32 t0)
-{
-	return max_t(s32, t1 - t0, 0);
-}
-
 static inline u32 tcp_skb_timestamp(const struct sk_buff *skb)
 {
 	return div_u64(skb->skb_mstamp, USEC_PER_SEC / TCP_TS_HZ);
