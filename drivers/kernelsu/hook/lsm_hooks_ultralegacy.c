@@ -15,7 +15,7 @@
 
 static uintptr_t selinux_ops_addr = 0x0;
 
-static int (*orig_setprocattr) (struct task_struct *p, char *name, void *value, size_t size) __read_mostly = NULL;
+static int (*orig_setprocattr) (struct task_struct *p, char *name, void *value, size_t size) __read_mostly = nullptr;
 static int hook_setprocattr(struct task_struct *p, char *name, void *value, size_t size)
 {
 	ksu_hide_setprocattr_inline(name, value, size);
@@ -23,7 +23,7 @@ static int hook_setprocattr(struct task_struct *p, char *name, void *value, size
 }
 
 static int (*orig_inode_rename) (struct inode *old_dir, struct dentry *old_dentry,
-			     struct inode *new_dir, struct dentry *new_dentry) __read_mostly = NULL;
+			     struct inode *new_dir, struct dentry *new_dentry) __read_mostly = nullptr;
 static int hook_inode_rename(struct inode *old_inode, struct dentry *old_dentry,
 			    struct inode *new_inode, struct dentry *new_dentry)
 {
@@ -31,7 +31,7 @@ static int hook_inode_rename(struct inode *old_inode, struct dentry *old_dentry,
 	return orig_inode_rename(old_inode, old_dentry, new_inode, new_dentry);
 }
 
-static int (*orig_bprm_check_security)(struct linux_binprm *bprm) __read_mostly = NULL;
+static int (*orig_bprm_check_security)(struct linux_binprm *bprm) __read_mostly = nullptr;
 static int hook_bprm_check_security(struct linux_binprm *bprm)
 {
 #ifdef CONFIG_KSU_FEATURE_SULOG
@@ -40,7 +40,7 @@ static int hook_bprm_check_security(struct linux_binprm *bprm)
 	return orig_bprm_check_security(bprm);
 }
 
-static int (*orig_task_fix_setuid) (struct cred *new, const struct cred *old, int flags) __read_mostly = NULL;
+static int (*orig_task_fix_setuid) (struct cred *new, const struct cred *old, int flags) __read_mostly = nullptr;
 static int hook_task_fix_setuid(struct cred *new, const struct cred *old, int flags)
 {
 	// see sys_setresuid
@@ -50,7 +50,7 @@ static int hook_task_fix_setuid(struct cred *new, const struct cred *old, int fl
 	return orig_task_fix_setuid(new, old, flags);
 }
 
-static int (*orig_file_permission) (struct file *file, int mask) __read_mostly = NULL;
+static int (*orig_file_permission) (struct file *file, int mask) __read_mostly = nullptr;
 static int hook_file_permission(struct file *file, int mask)
 {
 	if (unlikely(ksu_vfs_read_hook))
@@ -59,7 +59,7 @@ static int hook_file_permission(struct file *file, int mask)
 	return orig_file_permission(file, mask);
 }
 
-static int (*orig_bprm_set_creds)(struct linux_binprm *bprm) __read_mostly = NULL;
+static int (*orig_bprm_set_creds)(struct linux_binprm *bprm) __read_mostly = nullptr;
 static int ksu_unregister_bprm_set_creds(void *data)
 {
 	struct security_operations *ops = (struct security_operations *)selinux_ops_addr;
@@ -114,13 +114,13 @@ static inline bool verify_selinux_cred_free(void *fn_ptr)
 	// make sure this happens!
 	// #1. it wont trigger BUG_ON
 	// #2. this way it will kfree(NULL), which does nothing
-	*(volatile void **)&dummy_cred.security = NULL;
+	*(void **)&dummy_cred.security = nullptr;
 	barrier();
 
 	selinux_cred_free_fn(&dummy_cred);
 
 	// check if selinux_cred_free is successful
-	if ((unsigned long)*(volatile void **)&dummy_cred.security == 0x7UL)
+	if ((unsigned long)*(void **)&dummy_cred.security == 0x7UL)
 		success = true;
 
 	pr_info("selinux_cred_free: 0x%lx cred->security: 0x%lx success: %d\n", (unsigned long)fn_ptr, (unsigned long)dummy_cred.security, success);
@@ -140,8 +140,8 @@ static inline bool is_selinux_ops_valid(uintptr_t addr)
 	uintptr_t member_ptr = 0;
 	uintptr_t current_slot_addr;
 
-	// we will be off by one or off by two due to sizeof("selinux")
-	// thats 8 bytes, on 32 bit, this is two pointers worth, not a big deal
+	// we will be off by two or three due to sizeof(security_operations.name)
+	// thats 11 bytes, on 32 bit, this is three pointers worth, not a big deal
 
 density_verify_start:
 	current_slot_addr = addr + (i * sizeof(void *));
@@ -198,10 +198,8 @@ static inline bool check_candidate(uintptr_t addr)
 
 	pr_info("%s: selinux_cred_free found via ksym_lookup: 0x%lx probe_result: 0x%lx \n", __func__, (long)ksym_ptr, (long)candidate->cred_free);
 	return true;
-
 test_fn:
 #endif
-
 	// oh yeah I am so confident that this is it
 	pr_info("%s: candidate selinux_cred_free at 0x%lx\n", __func__, (long)candidate->cred_free);
 	return verify_selinux_cred_free((void *)candidate->cred_free);
@@ -272,7 +270,7 @@ static inline void set_selinux_ops()
 	extern struct list_head crypto_alg_list;
 	extern unsigned int avc_cache_threshold;
 	
-	struct security_operations *ops = NULL;
+	struct security_operations *ops = nullptr;
 
 // if user exports selinux_ops, we just go for it!
 #ifdef KSU_HAS_EXPORTED_SELINUX_OPS
