@@ -3872,6 +3872,11 @@ int wma_update_tdls_peer_state(WMA_HANDLE handle,
 		qdf_mem_zero(peer_cap, sizeof(*peer_cap));
 
 	if (peer_cap->peer_chanlen) {
+		if (peer_cap->peer_chanlen > WLAN_MAC_WMI_MAX_SUPP_CHANNELS ||
+		    peer_cap->peer_oper_classlen > WLAN_MAX_SUPP_OPER_CLASSES) {
+			ret = -EINVAL;
+			goto end_tdls_peer_state;
+		}
 		ch_mhz_len = sizeof(*ch_mhz) * peer_cap->peer_chanlen;
 		ch_mhz = qdf_mem_malloc(ch_mhz_len);
 		if (!ch_mhz) {
