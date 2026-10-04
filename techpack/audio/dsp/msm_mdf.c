@@ -273,8 +273,9 @@ static int msm_mdf_free_dma_buf(struct msm_mdf_mem *mem)
 		return -ENODEV;
 	}
 
-	//dma_free_coherent(mem->dev, mem->size, mem->va,
-	//				  mem->dma_addr);
+	dma_free_attrs(mem->dev, mem->size, mem->va,
+		       mem->dma_addr, DMA_ATTR_NO_KERNEL_MAPPING);
+	mem->va = NULL;
 
 	mem->device_status &= ~MSM_MDF_MEM_ALLOCATED;
 	return 0;
@@ -292,9 +293,10 @@ static int msm_mdf_dma_buf_unmap(struct msm_mdf_mem *mem,
 				__func__);
 			return -ENODEV;
 		}
-		//if (smmu->pa && mem->size)
-			//dma_unmap_single(smmu->cb_dev, smmu->pa,
-			//		 mem->size, DMA_BIDIRECTIONAL);
+		if (smmu->pa && mem->size)
+			dma_unmap_single_attrs(smmu->cb_dev, smmu->pa,
+					 mem->size, DMA_BIDIRECTIONAL,
+					 DMA_ATTR_SKIP_CPU_SYNC);
 	}
 
 	smmu->device_status &= ~MSM_MDF_MEM_MAPPED;
