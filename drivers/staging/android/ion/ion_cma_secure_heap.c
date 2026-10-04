@@ -510,12 +510,21 @@ retry:
 	info->table = kmalloc(sizeof(*info->table), GFP_KERNEL);
 	if (!info->table) {
 		dev_err(sheap->dev, "Fail to allocate sg table\n");
+		ion_secure_cma_free_from_pool(sheap, info->phys, len);
+		atomic_sub(len, &sheap->total_allocated);
 		goto err;
 	}
 
 	info->len = len;
-	ion_secure_cma_get_sgtable(sheap->dev,
+	ret = ion_secure_cma_get_sgtable(sheap->dev,
 				   info->table, info->phys, len);
+	if (ret) {
+		dev_err(sheap->dev, "Fail to get sgtable\n");
+		ion_secure_cma_free_from_pool(sheap, info->phys, len);
+		atomic_sub(len, &sheap->total_allocated);
+		kfree(info->table);
+		goto err;
+	}
 
 	/* keep this for memory release */
 	buffer->priv_virt = info;
@@ -656,9 +665,21 @@ retry:
 
 err2:
 	mutex_unlock(&sheap->alloc_lock);
+	list_for_each_entry_safe(nc_info, temp, &info->non_contig_list,
+				 entry) {
+		ion_secure_cma_free_from_pool(sheap, nc_info->phys,
+					      nc_info->len);
+		list_del(&nc_info->entry);
+		kfree(nc_info);
+	}
+	kfree(info->table);
+	goto err;
 err1:
 	list_for_each_entry_safe(nc_info, temp, &info->non_contig_list,
 				 entry) {
+		ion_secure_cma_free_from_pool(sheap, nc_info->phys,
+					      nc_info->len);
+		atomic_sub(nc_info->len, &sheap->total_allocated);
 		list_del(&nc_info->entry);
 		kfree(nc_info);
 	}
