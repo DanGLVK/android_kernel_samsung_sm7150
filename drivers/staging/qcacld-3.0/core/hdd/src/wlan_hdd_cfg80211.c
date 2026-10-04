@@ -3140,6 +3140,14 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 	if (tb[QCA_WLAN_VENDOR_ATTR_ACS_FREQ_LIST]) {
 		uint32_t *freq =
 			nla_data(tb[QCA_WLAN_VENDOR_ATTR_ACS_FREQ_LIST]);
+		/* ch_list_count is u8 and consumers bound lists by
+		 * NUM_CHANNELS: a longer list is malformed in both ways
+		 */
+		if (nla_len(tb[QCA_WLAN_VENDOR_ATTR_ACS_FREQ_LIST]) /
+		    sizeof(uint32_t) > NUM_CHANNELS) {
+			ret = -EINVAL;
+			goto out;
+		}
 		sap_config->acs_cfg.ch_list_count = nla_len(
 			tb[QCA_WLAN_VENDOR_ATTR_ACS_FREQ_LIST]) /
 				sizeof(uint32_t);
@@ -3168,6 +3176,11 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 	} else if (tb[QCA_WLAN_VENDOR_ATTR_ACS_CH_LIST]) {
 		uint8_t *tmp = nla_data(tb[QCA_WLAN_VENDOR_ATTR_ACS_CH_LIST]);
 
+		if (nla_len(tb[QCA_WLAN_VENDOR_ATTR_ACS_CH_LIST]) >
+		    NUM_CHANNELS) {
+			ret = -EINVAL;
+			goto out;
+		}
 		sap_config->acs_cfg.ch_list_count = nla_len(
 					tb[QCA_WLAN_VENDOR_ATTR_ACS_CH_LIST]);
 		if (sap_config->acs_cfg.ch_list_count) {
