@@ -620,7 +620,14 @@ static int camera_v4l2_vb2_q_init(struct file *filep)
 	q->io_modes = VB2_USERPTR;
 	q->buf_struct_size = sizeof(struct msm_vb2_buffer);
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	return vb2_queue_init(q);
+	if (vb2_queue_init(q)) {
+		kzfree(q->lock);
+		q->lock = NULL;
+		kzfree(q->drv_priv);
+		q->drv_priv = NULL;
+		return -ENOMEM;
+	}
+	return 0;
 }
 
 static void camera_v4l2_vb2_q_release(struct file *filep)
