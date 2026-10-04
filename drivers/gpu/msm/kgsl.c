@@ -4189,7 +4189,11 @@ static long sparse_unbind_range(struct kgsl_sparse_binding_object *obj,
 		} else if (bind_obj->v_off < offset) {
 			uint64_t diff = offset - bind_obj->v_off;
 
-			if (diff + size > bind_obj->size)
+			if (diff >= bind_obj->size) {
+				spin_unlock(&virt_entry->bind_lock);
+				return -EINVAL;
+			}
+			if (size > bind_obj->size - diff)
 				tmp_size = bind_obj->size - diff;
 		} else {
 			if (tmp_size > bind_obj->size)
