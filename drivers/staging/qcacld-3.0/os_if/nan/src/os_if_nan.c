@@ -534,6 +534,8 @@ static int os_if_nan_parse_security_params(struct nlattr **tb,
 
 	if (tb[QCA_WLAN_VENDOR_ATTR_NDP_PMK]) {
 		pmk->pmk_len = nla_len(tb[QCA_WLAN_VENDOR_ATTR_NDP_PMK]);
+		if (pmk->pmk_len > NDP_PMK_LEN)
+			return -EINVAL;
 		qdf_mem_copy(pmk->pmk,
 			     nla_data(tb[QCA_WLAN_VENDOR_ATTR_NDP_PMK]),
 			     pmk->pmk_len);
@@ -545,6 +547,8 @@ static int os_if_nan_parse_security_params(struct nlattr **tb,
 	if (tb[QCA_WLAN_VENDOR_ATTR_NDP_PASSPHRASE]) {
 		passphrase->passphrase_len =
 			nla_len(tb[QCA_WLAN_VENDOR_ATTR_NDP_PASSPHRASE]);
+		if (passphrase->passphrase_len > NAN_PASSPHRASE_MAX_LEN)
+			return -EINVAL;
 		qdf_mem_copy(passphrase->passphrase,
 			     nla_data(tb[QCA_WLAN_VENDOR_ATTR_NDP_PASSPHRASE]),
 			     passphrase->passphrase_len);
@@ -557,6 +561,8 @@ static int os_if_nan_parse_security_params(struct nlattr **tb,
 	if (tb[QCA_WLAN_VENDOR_ATTR_NDP_SERVICE_NAME]) {
 		service_name->service_name_len =
 			nla_len(tb[QCA_WLAN_VENDOR_ATTR_NDP_SERVICE_NAME]);
+		if (service_name->service_name_len > NAN_MAX_SERVICE_NAME_LEN)
+			return -EINVAL;
 		qdf_mem_copy(service_name->service_name,
 			     nla_data(
 				     tb[QCA_WLAN_VENDOR_ATTR_NDP_SERVICE_NAME]),
@@ -675,6 +681,10 @@ static int __os_if_nan_process_ndp_initiator_req(struct wlan_objmgr_psoc *psoc,
 	if (tb[QCA_WLAN_VENDOR_ATTR_NDP_APP_INFO]) {
 		req.ndp_info.ndp_app_info_len =
 			nla_len(tb[QCA_WLAN_VENDOR_ATTR_NDP_APP_INFO]);
+		if (req.ndp_info.ndp_app_info_len > NDP_APP_INFO_LEN) {
+			ret = -EINVAL;
+			goto initiator_req_failed;
+		}
 		qdf_mem_copy(req.ndp_info.ndp_app_info,
 			     nla_data(tb[QCA_WLAN_VENDOR_ATTR_NDP_APP_INFO]),
 			     req.ndp_info.ndp_app_info_len);
@@ -688,6 +698,11 @@ static int __os_if_nan_process_ndp_initiator_req(struct wlan_objmgr_psoc *psoc,
 	}
 
 	if (tb[QCA_WLAN_VENDOR_ATTR_NDP_IPV6_ADDR]) {
+		if (nla_len(tb[QCA_WLAN_VENDOR_ATTR_NDP_IPV6_ADDR]) !=
+		    QDF_IPV6_ADDR_SIZE) {
+			ret = -EINVAL;
+			goto initiator_req_failed;
+		}
 		req.is_ipv6_addr_present = true;
 		qdf_mem_copy(req.ipv6_addr,
 			     nla_data(tb[QCA_WLAN_VENDOR_ATTR_NDP_IPV6_ADDR]),
@@ -839,6 +854,10 @@ static int __os_if_nan_process_ndp_responder_req(struct wlan_objmgr_psoc *psoc,
 	if (tb[QCA_WLAN_VENDOR_ATTR_NDP_APP_INFO]) {
 		req.ndp_info.ndp_app_info_len =
 			nla_len(tb[QCA_WLAN_VENDOR_ATTR_NDP_APP_INFO]);
+		if (req.ndp_info.ndp_app_info_len > NDP_APP_INFO_LEN) {
+			ret = -EINVAL;
+			goto responder_req_failed;
+		}
 		qdf_mem_copy(req.ndp_info.ndp_app_info,
 			     nla_data(tb[QCA_WLAN_VENDOR_ATTR_NDP_APP_INFO]),
 			     req.ndp_info.ndp_app_info_len);
@@ -856,6 +875,11 @@ static int __os_if_nan_process_ndp_responder_req(struct wlan_objmgr_psoc *psoc,
 	}
 
 	if (tb[QCA_WLAN_VENDOR_ATTR_NDP_IPV6_ADDR]) {
+		if (nla_len(tb[QCA_WLAN_VENDOR_ATTR_NDP_IPV6_ADDR]) !=
+		    QDF_IPV6_ADDR_SIZE) {
+			ret = -EINVAL;
+			goto responder_req_failed;
+		}
 		req.is_ipv6_addr_present = true;
 		qdf_mem_copy(req.ipv6_addr,
 			     nla_data(tb[QCA_WLAN_VENDOR_ATTR_NDP_IPV6_ADDR]),
