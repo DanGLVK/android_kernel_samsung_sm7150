@@ -2213,7 +2213,7 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 	int unsigned_request = (uproc->attrs & FASTRPC_MODE_UNSIGNED_MODULE);
 	int cid = fl->cid;
 	int staticpd_set = 0;
-	struct fastrpc_channel_ctx *chan = &me->channel[cid];
+	struct fastrpc_channel_ctx *chan;
 
 	VERIFY(err, cid >= ADSP_DOMAIN_ID && cid < NUM_CHANNELS);
 	if (err) {
@@ -2222,6 +2222,7 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 			__func__, cid);
 		goto bail;
 	}
+	chan = &me->channel[cid];
 
 	if (chan->unsigned_support &&
 		fl->dev_minor == MINOR_NUM_DEV) {
@@ -3858,11 +3859,12 @@ static int fastrpc_get_info(struct fastrpc_file *fl, uint32_t *info)
 		goto bail;
 	cid = *info;
 	if (fl->cid == -1) {
-		struct fastrpc_channel_ctx *chan = &me->channel[cid];
+		struct fastrpc_channel_ctx *chan;
 
 		VERIFY(err, cid < NUM_CHANNELS);
 		if (err)
 			goto bail;
+		chan = &me->channel[cid];
 		/* Check to see if the device node is non-secure */
 		if (fl->dev_minor == MINOR_NUM_DEV) {
 			/*
