@@ -4995,6 +4995,10 @@ static QDF_STATUS sme_prepare_mgmt_tx(mac_handle_t mac_handle,
 
 	sme_debug("prepares auth frame");
 
+	/* msg->msg_len is u16: reject lengths that would truncate */
+	if (len > 0xFFFF - sizeof(*msg))
+		return QDF_STATUS_E_INVAL;
+
 	msg_len = sizeof(*msg) + len;
 	msg = qdf_mem_malloc(msg_len);
 	if (!msg) {
