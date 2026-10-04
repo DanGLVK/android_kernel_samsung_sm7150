@@ -1912,21 +1912,16 @@ static ssize_t sec_ts_tsp_cmoffset_all_read(struct file *file, char __user *buf,
 
 	if (copy_to_user(buf, ts->cmoffset_all_proc + pos, count)) {
 		input_err(true, &ts->client->dev, "%s : copy_to_user error!\n", __func__, retlen, pos);
-		kfree(ts->cmoffset_all_proc);
-		ts->cmoffset_all_proc = NULL;
-		retlen = 0;
 		return -EFAULT;
 	}
 
 	*offset += count;
 
-	if (pos + count >= retlen) {
+	if (count < len) {
 		input_info(true, &ts->client->dev, "%s : print all & free cmoffset_all_proc [%d][%d]\n",
 					__func__, retlen, offset);
-		if (ts->cmoffset_all_proc) {
+		if (ts->cmoffset_all_proc)
 			kfree(ts->cmoffset_all_proc);
-			ts->cmoffset_all_proc = NULL;
-		}
 		retlen = 0;
 	}
 
@@ -2001,21 +1996,16 @@ static ssize_t sec_ts_tsp_fail_hist_all_read(struct file *file, char __user *buf
 
 	if (copy_to_user(buf, ts->fail_hist_all_proc + pos, count)) {
 		input_err(true, &ts->client->dev, "%s : copy_to_user error!\n", __func__, retlen, pos);
-		kfree(ts->fail_hist_all_proc);
-		ts->fail_hist_all_proc = NULL;
-		retlen = 0;
 		return -EFAULT;
 	}
 
 	*offset += count;
 
-	if (pos + count >= retlen) {
+	if (count < len) {
 		input_info(true, &ts->client->dev, "%s : print all & free fail_hist_all_proc [%d][%d]\n",
 					__func__, retlen, offset);
-		if (ts->fail_hist_all_proc) {
+		if (ts->fail_hist_all_proc)
 			kfree(ts->fail_hist_all_proc);
-			ts->fail_hist_all_proc = NULL;
-		}
 		retlen = 0;
 	}
 
