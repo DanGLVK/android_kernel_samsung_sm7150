@@ -2525,6 +2525,9 @@ static int os_if_nan_generic_req(struct wlan_objmgr_psoc *psoc,
 	uint32_t buf_len;
 	QDF_STATUS status;
 
+	if (!tb[QCA_WLAN_VENDOR_ATTR_NAN_CMD_DATA])
+		return -EINVAL;
+
 	buf_len = nla_len(tb[QCA_WLAN_VENDOR_ATTR_NAN_CMD_DATA]);
 
 	nan_req = qdf_mem_malloc(sizeof(*nan_req) +  buf_len);
@@ -2590,6 +2593,9 @@ static int os_if_process_nan_enable_req(struct wlan_objmgr_psoc *psoc,
 			 chan_freq_2g);
 		return -EINVAL;
 	}
+
+	if (!tb[QCA_WLAN_VENDOR_ATTR_NAN_CMD_DATA])
+		return -EINVAL;
 
 	buf_len = nla_len(tb[QCA_WLAN_VENDOR_ATTR_NAN_CMD_DATA]);
 
