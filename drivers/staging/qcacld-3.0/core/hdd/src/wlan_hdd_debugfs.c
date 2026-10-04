@@ -175,6 +175,8 @@ static ssize_t __wcnss_wowpattern_write(struct net_device *net_dev,
 		return -EINVAL;
 
 	pattern_mask = token;
+	if (!*pattern_mask)
+		return -EINVAL;
 	pattern_mask[strlen(pattern_mask) - 1] = '\0';
 
 	hdd_add_wowl_ptrn_debugfs(adapter, pattern_idx, pattern_offset,
