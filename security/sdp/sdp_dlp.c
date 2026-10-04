@@ -304,6 +304,7 @@ static int __init dlp_ioctl_init(void) {
 static void __exit dlp_ioctl_exit(void) {
 	struct dlp_struct *tmp, *n;
 
+	misc_deregister(&dlp_misc_dev);
 	mutex_lock(&dlp_info.list_mutex);
 	list_for_each_entry_safe(tmp, n, &dlp_info.list, list) {
 		list_del(&tmp->list);
@@ -311,7 +312,6 @@ static void __exit dlp_ioctl_exit(void) {
 		kfree(tmp);
 	}
 	mutex_unlock(&dlp_info.list_mutex);
-	misc_deregister(&dlp_misc_dev);
 	printk("DLP: dlp_ioctl mics_deregister\n");
 }
 
