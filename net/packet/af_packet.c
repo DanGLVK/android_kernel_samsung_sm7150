@@ -3157,6 +3157,7 @@ static int packet_release(struct socket *sock)
 	preempt_enable();
 
 	spin_lock(&po->bind_lock);
+	WRITE_ONCE(po->num, 0);
 	unregister_prot_hook(sk, false);
 	packet_cached_dev_reset(po);
 
