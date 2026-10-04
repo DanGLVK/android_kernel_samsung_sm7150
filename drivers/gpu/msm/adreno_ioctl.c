@@ -26,11 +26,18 @@ static int adreno_process_perfcounter_add(struct kgsl_device_private *dev_priv,
 {
 	struct adreno_device_private *adreno_priv = container_of(dev_priv,
 		struct adreno_device_private, dev_priv);
-	struct adreno_perfcounter_list_node *perfctr;
+	struct adreno_perfcounter_list_node *perfctr, *tmp;
 
 	perfctr = kmalloc(sizeof(*perfctr), GFP_KERNEL);
 	if (!perfctr)
 		return -ENOMEM;
+
+	list_for_each_entry(tmp, &adreno_priv->perfcounter_list, node) {
+		if (tmp->groupid == groupid && tmp->countable == countable) {
+			kfree(perfctr);
+			return -EEXIST;
+		}
+	}
 
 	perfctr->groupid = groupid;
 	perfctr->countable = countable;
