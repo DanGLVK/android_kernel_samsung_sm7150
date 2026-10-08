@@ -402,9 +402,7 @@ typedef unsigned __int128 uint128_t;
  * __may_alias to workaround "optimizations" even on -fno-strict-aliasing
  *
  */
-#ifndef __may_alias
 #define __may_alias __attribute__((__may_alias__))
-#endif
 
 /**
  * __attribute__((__cleanup__()))
