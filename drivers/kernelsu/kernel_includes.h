@@ -42,6 +42,7 @@
 #include <linux/anon_inodes.h>
 #include <linux/atomic.h>
 #include <linux/binfmts.h>
+#include <linux/bitmap.h>
 #include <linux/cache.h>
 #include <linux/capability.h>
 #include <linux/compat.h>

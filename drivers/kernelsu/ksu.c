@@ -327,7 +327,9 @@ static int __init kernelsu_lkm_init(void)
 
 	on_post_fs_data();
 	on_boot_completed();
-	
+
+	ksu_feature_apply_forced();
+
 	if (!!getenforce())
 		return 0;
 	

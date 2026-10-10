@@ -331,6 +331,17 @@ static ssize_t ksu_strscpy_pad(char *dest, const char *src, size_t count)
 #define strscpy_pad ksu_strscpy_pad
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 16, 0)
+// https://elixir.bootlin.com/linux/v3.16/source/lib/string.c#L305
+static char *ksu_strchrnul(const char *s, int c)
+{
+	while (*s && *s != (char)c)
+		s++;
+	return (char *)s;
+}
+#define strchrnul ksu_strchrnul
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
 #define d_is_reg(dentry) S_ISREG((dentry)->d_inode->i_mode)
 #endif
