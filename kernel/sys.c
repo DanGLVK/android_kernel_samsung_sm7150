@@ -17,6 +17,7 @@
 #include <linux/perf_event.h>
 #include <linux/resource.h>
 #include <linux/kernel.h>
+#include <linux/prio_filter.h>
 #include <linux/workqueue.h>
 #include <linux/capability.h>
 #include <linux/device.h>
@@ -202,6 +203,12 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 	if (which > PRIO_USER || which < PRIO_PROCESS)
 		goto out;
 
+#ifdef CONFIG_PRIO_FILTER
+	/* fgetpriority port: selected app uids answer as "not running" */
+	if (prio_filter_blocks(PF_SITE_PRIO, which, who))
+		return -ESRCH;
+#endif
+
 	/* normalize: avoid signed division (rounding problems) */
 	error = -ESRCH;
 	if (niceval < MIN_NICE)
@@ -271,6 +278,12 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 
 	if (which > PRIO_USER || which < PRIO_PROCESS)
 		return -EINVAL;
+
+#ifdef CONFIG_PRIO_FILTER
+	/* fgetpriority port: selected app uids answer as "not running" */
+	if (prio_filter_blocks(PF_SITE_PRIO, which, who))
+		return -ESRCH;
+#endif
 
 	rcu_read_lock();
 	read_lock(&tasklist_lock);
