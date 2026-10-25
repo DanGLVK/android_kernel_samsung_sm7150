@@ -2176,6 +2176,28 @@ config FAKE_UNAME_6_12
 
 endchoice
 
+config PRIO_FILTER
+	bool "Not-running shaping for cross-UID priority syscalls"
+	default n
+	help
+	  Answer -ESRCH (stock "UID without running tasks" answer) instead of
+	  the usual results when a Zygote-seccomped application looks up
+	  another application id through getpriority(PRIO_USER, ...),
+	  setpriority(PRIO_USER, ...), ioprio_get(IOPRIO_WHO_USER, ...) or
+	  ioprio_set(IOPRIO_WHO_USER, ...).
+
+	  Root userspace selects which UIDs are affected by writing
+	  /sys/module/prio_filter/command (enable/disable/reset) and reports
+	  state via /sys/module/prio_filter/state (bitmap hex dump).  Only
+	  normal app processes (uid >= 10000, seccomped) are ever filtered,
+	  caller-own queries are always answered normally and invalid
+	  `which` / ioprio class arguments keep their stock -EINVAL paths.
+
+	  Built into your kernel image with CONFIG_PRIO_FILTER=y (modules are
+	  unsupported).  With the option unset, or with an empty bitmap, the
+	  syscalls are bit-for-bit stock, so this stays userspace-safe until
+	  explicitly configured.
+
 source "kernel/Kconfig.locks"
 
 source "init/Kconfig.gki"
