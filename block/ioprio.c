@@ -31,6 +31,7 @@
 #include <linux/syscalls.h>
 #include <linux/security.h>
 #include <linux/pid_namespace.h>
+#include <linux/prio_filter.h>
 
 int set_task_ioprio(struct task_struct *task, int ioprio)
 {
@@ -93,6 +94,11 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 	}
 
 	ret = -ESRCH;
+#ifdef CONFIG_PRIO_FILTER
+	/* fgetpriority port: selected app uids answer as "not running" */
+	if (prio_filter_blocks(PF_SITE_IOPRIO, which, who))
+		return -ESRCH;
+#endif
 	rcu_read_lock();
 	switch (which) {
 		case IOPRIO_WHO_PROCESS:
@@ -180,6 +186,12 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
 	kuid_t uid;
 	int ret = -ESRCH;
 	int tmpio;
+
+#ifdef CONFIG_PRIO_FILTER
+	/* fgetpriority port: selected app uids answer as "not running" */
+	if (prio_filter_blocks(PF_SITE_IOPRIO, which, who))
+		return -ESRCH;
+#endif
 
 	rcu_read_lock();
 	switch (which) {
