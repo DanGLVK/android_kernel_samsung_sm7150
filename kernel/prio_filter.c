@@ -44,6 +44,7 @@
 #include <linux/resource.h>	/* PRIO_USER */
 #include <linux/ioprio.h>	/* IOPRIO_WHO_USER */
 #include <linux/sched.h>
+#include <linux/cred.h>		/* current_uid() / current_euid() */
 #include <linux/seccomp.h>
 #include <linux/string.h>
 #include <linux/thread_info.h>
