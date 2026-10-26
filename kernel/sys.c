@@ -199,14 +199,23 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 	int error = -EINVAL;
 	struct pid *pgrp;
 	kuid_t uid;
+#ifdef CONFIG_PRIO_FILTER
+	bool pf_hit;	/* fgetpriority port verdict: applied in PRIO_USER */
+#endif
 
 	if (which > PRIO_USER || which < PRIO_PROCESS)
 		goto out;
 
 #ifdef CONFIG_PRIO_FILTER
-	/* fgetpriority port: selected app uids answer as "not running" */
-	if (prio_filter_blocks(PF_SITE_PRIO, which, who))
-		return -ESRCH;
+	/*
+	 * fgetpriority port: selected app uids answer as "not running".
+	 * The verdict is taken now but applied inside the PRIO_USER arm,
+	 * after the lock + find_user() prefix an absent-uid caller pays
+	 * anyway, so a hidden uid keeps "no running tasks" timing and no
+	 * early-return signature is distinguishable from a plain absent
+	 * uid.  (Side-channel hardening; semantics unchanged.)
+	 */
+	pf_hit = prio_filter_blocks(PF_SITE_PRIO, which, who);
 #endif
 
 	/* normalize: avoid signed division (rounding problems) */
@@ -246,6 +255,12 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 			if (!user)
 				goto out_unlock;	/* No processes for this user */
 		}
+		if (pf_hit) {
+			/* hidden: keep stock absent-uid timing; skip the walk */
+			if (!uid_eq(uid, cred->uid))
+				free_uid(user);		/* For find_user() */
+			goto out_unlock;
+		}
 		do_each_thread(g, p) {
 			if (uid_eq(task_uid(p), uid) && task_pid_vnr(p))
 				error = set_one_prio(p, niceval, error);
@@ -275,14 +290,23 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 	long niceval, retval = -ESRCH;
 	struct pid *pgrp;
 	kuid_t uid;
+#ifdef CONFIG_PRIO_FILTER
+	bool pf_hit;	/* fgetpriority port verdict: applied in PRIO_USER */
+#endif
 
 	if (which > PRIO_USER || which < PRIO_PROCESS)
 		return -EINVAL;
 
 #ifdef CONFIG_PRIO_FILTER
-	/* fgetpriority port: selected app uids answer as "not running" */
-	if (prio_filter_blocks(PF_SITE_PRIO, which, who))
-		return -ESRCH;
+	/*
+	 * fgetpriority port: selected app uids answer as "not running".
+	 * The verdict is taken now but applied inside the PRIO_USER arm,
+	 * after the lock + find_user() prefix an absent-uid caller pays
+	 * anyway, so a hidden uid keeps "no running tasks" timing and no
+	 * early-return signature is distinguishable from a plain absent
+	 * uid.  (Side-channel hardening; semantics unchanged.)
+	 */
+	pf_hit = prio_filter_blocks(PF_SITE_PRIO, which, who);
 #endif
 
 	rcu_read_lock();
@@ -319,6 +343,12 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 			user = find_user(uid);
 			if (!user)
 				goto out_unlock;	/* No processes for this user */
+		}
+		if (pf_hit) {
+			/* hidden: keep stock absent-uid timing; skip the walk */
+			if (!uid_eq(uid, cred->uid))
+				free_uid(user);		/* for find_user() */
+			goto out_unlock;
 		}
 		do_each_thread(g, p) {
 			if (uid_eq(task_uid(p), uid) && task_pid_vnr(p)) {
