@@ -71,9 +71,6 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 	struct pid *pgrp;
 	kuid_t uid;
 	int ret;
-#ifdef CONFIG_PRIO_FILTER
-	bool pf_hit;	/* fgetpriority port verdict: applied in WHO_USER */
-#endif
 
 	switch (class) {
 		case IOPRIO_CLASS_RT:
@@ -98,14 +95,9 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 
 	ret = -ESRCH;
 #ifdef CONFIG_PRIO_FILTER
-	/*
-	 * fgetpriority port: selected app uids answer as "not running".
-	 * The verdict is taken now but applied inside the WHO_USER arm,
-	 * after the find_user() lookup an absent-uid caller pays anyway,
-	 * so a hidden uid keeps "no running tasks" timing (no early-return
-	 * signature distinguishable from a plain absent uid).
-	 */
-	pf_hit = prio_filter_blocks(PF_SITE_IOPRIO, which, who);
+	/* fgetpriority port: selected app uids answer as "not running" */
+	if (prio_filter_blocks(PF_SITE_IOPRIO, which, who))
+		return -ESRCH;
 #endif
 	rcu_read_lock();
 	switch (which) {
@@ -139,9 +131,6 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 
 			if (!user)
 				break;
-
-			if (pf_hit)
-				goto free_uid;	/* hidden: skip walk, keep -ESRCH */
 
 			for_each_process_thread(g, p) {
 				if (!uid_eq(task_uid(p), uid) ||
@@ -197,19 +186,11 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
 	kuid_t uid;
 	int ret = -ESRCH;
 	int tmpio;
-#ifdef CONFIG_PRIO_FILTER
-	bool pf_hit;	/* fgetpriority port verdict: applied in WHO_USER */
-#endif
 
 #ifdef CONFIG_PRIO_FILTER
-	/*
-	 * fgetpriority port: selected app uids answer as "not running".
-	 * The verdict is taken now but applied inside the WHO_USER arm,
-	 * after the find_user() lookup an absent-uid caller pays anyway,
-	 * so a hidden uid keeps "no running tasks" timing (no early-return
-	 * signature distinguishable from a plain absent uid).
-	 */
-	pf_hit = prio_filter_blocks(PF_SITE_IOPRIO, which, who);
+	/* fgetpriority port: selected app uids answer as "not running" */
+	if (prio_filter_blocks(PF_SITE_IOPRIO, which, who))
+		return -ESRCH;
 #endif
 
 	rcu_read_lock();
@@ -250,9 +231,6 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
 			if (!user)
 				break;
 
-			if (pf_hit)
-				goto skip_walk;	/* hidden: skip walk, keep -ESRCH */
-
 			for_each_process_thread(g, p) {
 				if (!uid_eq(task_uid(p), user->uid) ||
 				    !task_pid_vnr(p))
@@ -265,7 +243,7 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
 				else
 					ret = ioprio_best(ret, tmpio);
 			}
-skip_walk:
+
 			if (who)
 				free_uid(user);
 			break;
