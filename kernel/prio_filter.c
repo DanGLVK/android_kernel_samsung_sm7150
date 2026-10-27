@@ -32,6 +32,18 @@
  * kernel/sys.c (error = -ESRCH before the switch) and block/ioprio.c
  * (ret = -ESRCH initial).  Invalid `which` / ioprio class values keep their
  * stock -EINVAL paths: call sites only call us after their own validation.
+ *
+ * Known side channel (accepted for now): the hook answers -ESRCH before
+ * the rcu_read_lock()/tasklist_lock()/find_user() sequence that a stock
+ * "uid with no running tasks" caller pays, so a timing-aware scanner
+ * could distinguish filtered from absent uids via syscall latency even
+ * though the error code itself is identical.  Local commit f93a82c2df28
+ * built the equalization (verdict recorded early, applied inside the
+ * uid arm after the lock/find_user prefix, refcounts preserved) and was
+ * reverted by 4727738838eb on request; re-evaluate that patch if scanner
+ * instrumentation ever becomes a real concern.  (For reference, the
+ * upstream fgetpriority LKM reaches the same guarantee incidentally by
+ * rewriting `who` to 99999 and letting the stock path answer ESRCH.)
  */
 
 #define pr_fmt(fmt) "prio_filter: " fmt
