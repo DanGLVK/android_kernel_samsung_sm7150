@@ -27,6 +27,27 @@ enum prio_filter_site {
 	PF_SITE_IOPRIO = 2,	/* sys_ioprio_get() / sys_ioprio_set() */
 };
 
+/*
+ * "Certifiably dead" uid substituted for a hidden target before the stock
+ * syscall body runs: no user_struct, no running tasks -> the stock code's
+ * own absent-uid path answers -ESRCH (identical errno *and* identical
+ * timing to querying any uid that is simply not running, so no fast-path
+ * signature is observable).  Mechanism credited to upstream fgetpriority
+ * (aerath-stuff/fgetpriority@7e8360bf), which rewrites `who` in the
+ * syscall table hook prologue; here the rewrite happens inside the
+ * syscall body instead.
+ *
+ * 99999 is the last isolated-uid slot (99000..99999); reaching it would
+ * need ~999 concurrent isolated processes.  In that corner the stock body
+ * would answer *for* that process rather than -ESRCH — accepted, same
+ * behaviour as upstream.
+ *
+ * Callers querying uid 99999 itself are unaffected: the filter verdict
+ * for it is false (appid 99999 is outside the [10000, 19999) window), so
+ * such a query is stock all the way through.
+ */
+#define PF_NO_TASKS_UID		99999
+
 #ifdef CONFIG_PRIO_FILTER
 
 bool prio_filter_blocks(enum prio_filter_site site, int which, int who);

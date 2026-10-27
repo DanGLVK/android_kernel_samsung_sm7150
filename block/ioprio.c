@@ -95,9 +95,16 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 
 	ret = -ESRCH;
 #ifdef CONFIG_PRIO_FILTER
-	/* fgetpriority port: selected app uids answer as "not running" */
+	/*
+	 * fgetpriority port: selected app uids answer as "not running".
+	 * Rather than fabricating -ESRCH here, hand the stock WHO_USER
+	 * arm a "certifiably dead" target: find_user() misses, the walk
+	 * never runs and the stock path returns its own -ESRCH with the
+	 * timing of a plain absent-uid lookup.  Mechanism: upstream
+	 * fgetpriority (aerath-stuff/fgetpriority@7e8360bf).
+	 */
 	if (prio_filter_blocks(PF_SITE_IOPRIO, which, who))
-		return -ESRCH;
+		who = PF_NO_TASKS_UID;
 #endif
 	rcu_read_lock();
 	switch (which) {
@@ -188,9 +195,16 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
 	int tmpio;
 
 #ifdef CONFIG_PRIO_FILTER
-	/* fgetpriority port: selected app uids answer as "not running" */
+	/*
+	 * fgetpriority port: selected app uids answer as "not running".
+	 * Rather than fabricating -ESRCH here, hand the stock WHO_USER
+	 * arm a "certifiably dead" target: find_user() misses, the walk
+	 * never runs and the stock path returns its own -ESRCH with the
+	 * timing of a plain absent-uid lookup.  Mechanism: upstream
+	 * fgetpriority (aerath-stuff/fgetpriority@7e8360bf).
+	 */
 	if (prio_filter_blocks(PF_SITE_IOPRIO, which, who))
-		return -ESRCH;
+		who = PF_NO_TASKS_UID;
 #endif
 
 	rcu_read_lock();

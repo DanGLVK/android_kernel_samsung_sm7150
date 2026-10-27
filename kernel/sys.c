@@ -204,9 +204,16 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 		goto out;
 
 #ifdef CONFIG_PRIO_FILTER
-	/* fgetpriority port: selected app uids answer as "not running" */
+	/*
+	 * fgetpriority port: selected app uids answer as "not running".
+	 * Rather than fabricating -ESRCH here, hand the stock body a
+	 * "certifiably dead" target: its own absent-uid path produces the
+	 * errno (and the timing of a plain absent-uid lookup), so no
+	 * early-return signature is observable.  Mechanism: upstream
+	 * fgetpriority (aerath-stuff/fgetpriority@7e8360bf).
+	 */
 	if (prio_filter_blocks(PF_SITE_PRIO, which, who))
-		return -ESRCH;
+		who = PF_NO_TASKS_UID;
 #endif
 
 	/* normalize: avoid signed division (rounding problems) */
@@ -280,9 +287,16 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 		return -EINVAL;
 
 #ifdef CONFIG_PRIO_FILTER
-	/* fgetpriority port: selected app uids answer as "not running" */
+	/*
+	 * fgetpriority port: selected app uids answer as "not running".
+	 * Rather than fabricating -ESRCH here, hand the stock body a
+	 * "certifiably dead" target: its own absent-uid path produces the
+	 * errno (and the timing of a plain absent-uid lookup), so no
+	 * early-return signature is observable.  Mechanism: upstream
+	 * fgetpriority (aerath-stuff/fgetpriority@7e8360bf).
+	 */
 	if (prio_filter_blocks(PF_SITE_PRIO, which, who))
-		return -ESRCH;
+		who = PF_NO_TASKS_UID;
 #endif
 
 	rcu_read_lock();
