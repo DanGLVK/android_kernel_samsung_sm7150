@@ -33,6 +33,18 @@
  * (ret = -ESRCH initial).  Invalid `which` / ioprio class values keep their
  * stock -EINVAL paths: call sites only call us after their own validation.
  *
+ * Modes (root-switchable via /sys/module/prio_filter/command; default hma,
+ * reset on every boot like the bitmap):
+ *   hma     - a target answers -ESRCH when its appid bit is set; userspace
+ *             fgetp seeds the bitmap from the HMA-OSS config.  Selective,
+ *             aggregate scanners keep seeing plausible task counts.
+ *   blanket - every cross-app app-uid target answers -ESRCH regardless of
+ *             the bitmap (ported from upstream fgetpriority lkm@9863c182
+ *             "Remove all service requirements").  Zero-config, but
+ *             aggregate "task UIDs found" counters collapse to ~0 for
+ *             scanning apps, which is itself a fingerprint.
+ * The own-target exemption stays raw-uid equality in both modes.
+ *
  * Answering mechanism (see PF_NO_TASKS_UID in include/linux/prio_filter.h):
  * on a hit the call site substitutes a dead uid (99999) and lets the
  * unmodified syscall body run, so errno *and* latency equal a plain
@@ -72,6 +84,9 @@
 #define PF_USER_OFFSET	100000
 
 static DECLARE_BITMAP(pf_bitmap, PF_APPID_COUNT);
+
+/* blanket mode: every cross-app uid reads as "not running" (bitmap ignored) */
+static bool pf_blanket;
 
 static inline bool pf_appid_applicable(unsigned int appid)
 {
@@ -121,6 +136,11 @@ bool prio_filter_blocks(enum prio_filter_site site, int which, int who)
 	if (!pf_appid_applicable(pf_appid_of(who)))
 		return false;
 
+	/* blanket mode: anything that is not the caller's own uid reads
+	 * as "not running" (upstream fgetpriority blanket semantics) */
+	if (pf_blanket)
+		return true;
+
 	return test_bit(pf_appid_of(who) - PF_APPID_FIRST, pf_bitmap);
 }
 EXPORT_SYMBOL_GPL(prio_filter_blocks);
@@ -131,6 +151,8 @@ EXPORT_SYMBOL_GPL(prio_filter_blocks);
  *   enable <uid>    start answering -ESRCH for <uid>
  *   disable <uid>   stop answering -ESRCH for <uid>
  *   reset           clear everything
+ *   mode hma        verdicts come from the bitmap (default)
+ *   mode blanket    every cross-app uid answers -ESRCH (bitmap ignored)
  *
  * Only euid 0 may change state (su context); everyone else gets -EPERM.
  * Bits are keyed on the application id, so enabling 10042 or 110042 both
@@ -154,6 +176,7 @@ static int pf_apply_uid(unsigned int appid, bool enable)
 static int pf_parse_command(const char *buf, size_t count)
 {
 	char cmd[16];
+	char arg[16];
 	int uid;
 	int consumed = 0;
 
@@ -165,6 +188,22 @@ static int pf_parse_command(const char *buf, size_t count)
 		bitmap_zero(pf_bitmap, PF_APPID_COUNT);
 		pr_info("reset\n");
 		return 0;
+	}
+
+	if (!strcmp(cmd, "mode")) {
+		if (sscanf(buf + consumed, "%15s", arg) != 1)
+			return -EINVAL;
+		if (!strcmp(arg, "hma")) {
+			pf_blanket = false;
+			pr_info("mode: hma (bitmap seeding)\n");
+			return 0;
+		}
+		if (!strcmp(arg, "blanket")) {
+			pf_blanket = true;
+			pr_info("mode: blanket (all cross-app reads absent)\n");
+			return 0;
+		}
+		return -EINVAL;
 	}
 
 	if (sscanf(buf + consumed, "%d", &uid) != 1)
@@ -197,6 +236,18 @@ static ssize_t pf_command_store(struct kobject *kobj, struct kobj_attribute *att
 }
 
 /*
+ * /sys/module/prio_filter/mode, 0400 root:root:
+ *   "hma"     - the bitmap decides (fgetp-seeded, the default)
+ *   "blanket" - every app uid outside the caller's own reads as not running
+ *               (bitmap still seedable but ignored by verdicts)
+ */
+static ssize_t pf_mode_show(struct kobject *kobj, struct kobj_attribute *attr,
+			    char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", pf_blanket ? "blanket" : "hma");
+}
+
+/*
  * /sys/module/prio_filter/state, 0400 root:root:
  * hex dump of the bitmap, byte 0 = application id 10000 bit 0.
  */
@@ -225,9 +276,13 @@ static struct kobj_attribute pf_command_attr =
 static struct kobj_attribute pf_state_attr =
 	__ATTR(state, 0400, pf_state_show, NULL);
 
+static struct kobj_attribute pf_mode_attr =
+	__ATTR(mode, 0400, pf_mode_show, NULL);
+
 static struct attribute *pf_attrs[] = {
 	&pf_command_attr.attr,
 	&pf_state_attr.attr,
+	&pf_mode_attr.attr,
 	NULL,
 };
 
