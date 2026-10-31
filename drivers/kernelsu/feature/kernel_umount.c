@@ -116,12 +116,11 @@ static inline int ksu_handle_umount(struct cred *new, const struct cred *old)
 		pr_info("handle umount ignore non zygote child: %d\n", current->pid);
 		return 0;
 	}
-
-#ifdef CONFIG_KSU_HOSTSREDIRECT
-	set_thread_flag(TIF_KSU_UNMOUNTABLE);
-#endif
 	// umount the target mnt
 	pr_info("handle umount for uid: %d, pid: %d\n", new_uid, current->pid);
+
+	// hostsredirect and getpriority filter tracks this flag
+	set_thread_flag(TIF_KSU_UNMOUNTABLE);
 
 	const struct cred *saved = override_creds(ksu_cred);
 
@@ -138,6 +137,7 @@ static inline int ksu_handle_umount(struct cred *new, const struct cred *old)
 	return 0;
 }
 #endif // #if !defined(CONFIG_KSU_SUSFS) || !defined(CONFIG_KSU_SUSFS_TRY_UMOUNT)
+
 
 void __init ksu_kernel_umount_init(void)
 {
