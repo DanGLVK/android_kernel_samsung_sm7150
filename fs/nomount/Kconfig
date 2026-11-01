@@ -1,0 +1,22 @@
+# Kconfig for NoMount
+#
+# Vendored from maxsteeel/nomount kernel/src/.  Upstream declares this as a
+# tristate with `default y` so the prebuilt workflows can also build it out
+# of tree (=m); in this tree the feature is built-in only (no modules are
+# ever shipped), so it is a bool and defaults off - enabled explicitly via
+# CONFIG_NOMOUNT=y in the target defconfig.  With or without rules the
+# driver registers only a keyring type ("nomount") and touches nothing else
+# until a root userspace process submits a payload through add_key(2), so
+# leaving it disabled keeps stock behaviour bit for bit.
+
+config NOMOUNT
+	bool "NoMount path redirection subsystem (mountless module support)"
+	default n
+	help
+	  NoMount allows path redirection and virtual file injection
+	  without mounting filesystems. Useful for systemless modifications.
+
+	  Upstream: https://github.com/maxsteeel/nomount (kernel/src/).
+	  Control taps the keyring: a root caller passes a page-pinned
+	  "nomount" key payload describing injection/whiteout rules and
+	  per-UID exclusions; rules live in RAM and vanish on reboot.
