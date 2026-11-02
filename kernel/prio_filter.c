@@ -46,13 +46,16 @@
  * The own-target exemption stays raw-uid equality in both modes.
  *
  * Answering mechanism (see PF_NO_TASKS_UID in include/linux/prio_filter.h):
- * on a hit the call site substitutes a dead uid (99999) and lets the
- * unmodified syscall body run, so errno *and* latency equal a plain
- * absent-uid lookup — there is no fast path for filtered targets and no
- * timing signature to observe.  History: the original hook returned
- * -ESRCH directly (fast-path latency leak, documented 4727738838eb);
- * local f93a82c2df28 equalized timing inside the uid arms but was
- * reverted for now; the dead-uid substitution supersedes both.
+ * on a hit the call site substitutes an unmappable uid ((uid_t)-1, sent
+ * by upstream aerath-stuff/fgetpriority@9deff90 to replace the earlier
+ * 99999 last-isolated-slot choice) and lets the unmodified syscall body
+ * run, so errno *and* latency equal a plain absent-uid lookup — there is
+ * no fast path for filtered targets and no timing signature to observe.
+ * History: the original hook returned -ESRCH directly (fast-path latency
+ * leak, documented 4727738838eb); local f93a82c2df28 equalized timing
+ * inside the uid arms but was reverted for now; the dead-uid
+ * substitution supersedes both, and (uid_t)-1 removes the only corner
+ * the 99999 sentinel had (a live isolated process on the last uid).
  */
 
 #define pr_fmt(fmt) "prio_filter: " fmt

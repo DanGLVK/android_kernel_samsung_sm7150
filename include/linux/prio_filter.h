@@ -28,25 +28,34 @@ enum prio_filter_site {
 };
 
 /*
- * "Certifiably dead" uid substituted for a hidden target before the stock
+ * An unmappable uid substituted for a hidden target before the stock
  * syscall body runs: no user_struct, no running tasks -> the stock code's
  * own absent-uid path answers -ESRCH (identical errno *and* identical
  * timing to querying any uid that is simply not running, so no fast-path
- * signature is observable).  Mechanism credited to upstream fgetpriority
- * (aerath-stuff/fgetpriority@7e8360bf), which rewrites `who` in the
- * syscall table hook prologue; here the rewrite happens inside the
- * syscall body instead.
+ * signature is observable).
  *
- * 99999 is the last isolated-uid slot (99000..99999); reaching it would
- * need ~999 concurrent isolated processes.  In that corner the stock body
- * would answer *for* that process rather than -ESRCH — accepted, same
- * behaviour as upstream.
+ * (uid_t)-1 is the kernel's own INVALID_UID sentinel value, so uid_valid()
+ * is false by construction and the pass-through intact: argument
+ * validation still runs, no existing user_struct or task can be attached
+ * to it, and setters cannot reach their permission checks against a real
+ * process.  Mechanism credited to upstream fgetpriority (aerath-stuff/
+ * fgetpriority@7e8360bf), which rewrites `who` in the syscall table hook
+ * prologue; here the rewrite happens inside the syscall body instead.
  *
- * Callers querying uid 99999 itself are unaffected: the filter verdict
- * for it is false (appid 99999 is outside the [10000, 19999) window), so
- * such a query is stock all the way through.
+ * Sentinel value credit: upstream aerath-stuff/fgetpriority@9deff90
+ * ("Use an invalid UID for filtered priority operations") superseded the
+ * former 99999 choice, the last isolated-uid slot.  Isolated uids *can*
+ * own live tasks (up to LAST_ISOLATED_UID), and a substituted uid that a
+ * real process holds would be answered *for* rather than with -ESRCH;
+ * (uid_t)-1 cannot ever be mapped to a kuid a task carries.
+ *
+ * Callers querying this sentinel itself are unaffected: the filter
+ * verdict for it is false (pf_appid_of((uid_t)-1) = 67295, outside the
+ * [10000, 19999) window), and a negative `who` bails at the same
+ * guard the stock body runs first regardless - such a query is stock
+ * all the way through.
  */
-#define PF_NO_TASKS_UID		99999
+#define PF_NO_TASKS_UID		((int)(uid_t)-1)
 
 #ifdef CONFIG_PRIO_FILTER
 
