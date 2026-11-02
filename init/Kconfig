@@ -2198,6 +2198,27 @@ config PRIO_FILTER
 	  syscalls are bit-for-bit stock, so this stays userspace-safe until
 	  explicitly configured.
 
+config PRIO_FILTER_CONTROL
+	bool "Expose the sysfs control interface"
+	depends on PRIO_FILTER
+	default n
+	help
+	  Create /sys/module/prio_filter/{command,mode,state} so root
+	  userspace (the fgetp tool) can seed the per-application bitmap and
+	  switch verdict modes at runtime.  Default for managed kernels:
+	  select =y in the target defconfig when fgetp is in use.
+
+	  If unset (=n), the interface does not exist and the filter runs
+	  blanket mode permanently: every cross-application priority lookup
+	  answers -ESRCH (caller-own queries stay stock) with no bits seeded
+	  and nothing to configure.  Nothing in the device tree exposes the
+	  feature's state beyond dmesg lines at init.  This mirrors upstream
+	  fgetpriority's stock posture, whose module ships an empty whitelist
+	  (all cross-app appids read as "not running" until entries are
+	  added).  Blanket verdicts cost one constant-true branch, so the
+	  interface-off build remains as cheap as the interface-on one on
+	  hot paths.
+
 source "kernel/Kconfig.locks"
 
 source "init/Kconfig.gki"

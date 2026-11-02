@@ -18,7 +18,10 @@
  * empty at boot, so stock behaviour is preserved bit-for-bit until root
  * userspace makes a UID visible to it.  Root-only control lives at
  * /sys/module/prio_filter/{command,state}; hide that path with SUSFS or any
- * other hiding layer if desired.
+ * other hiding layer if desired.  The interface itself is optional
+ * (CONFIG_PRIO_FILTER_CONTROL): when compiled out the filter runs
+ * blanket-locked with no device-visible control path at all (see the
+ * pf_blanket note below).
  *
  * Semantics (mirrors fgetpriority's getpriority_should_swap() as closely as
  * the API differs):
@@ -33,7 +36,8 @@
  * (ret = -ESRCH initial).  Invalid `which` / ioprio class values keep their
  * stock -EINVAL paths: call sites only call us after their own validation.
  *
- * Modes (root-switchable via /sys/module/prio_filter/command; default hma,
+ * Modes (with CONFIG_PRIO_FILTER_CONTROL=y, root-switchable via
+ * /sys/module/prio_filter/command; default hma,
  * reset on every boot like the bitmap):
  *   hma     - a target answers -ESRCH when its appid bit is set; userspace
  *             fgetp seeds the bitmap from the HMA-OSS config.  Selective,
@@ -89,7 +93,18 @@
 static DECLARE_BITMAP(pf_bitmap, PF_APPID_COUNT);
 
 /* blanket mode: every cross-app uid reads as "not running" (bitmap ignored) */
+#ifdef CONFIG_PRIO_FILTER_CONTROL
 static bool pf_blanket;
+#else
+/*
+ * No control surface: the filter is locked in blanket mode, which is what
+ * upstream fgetpriority operates as by default (its whitelist ships empty,
+ * so every cross-app appid reads as "not running" and nothing is
+ * configurable).  Nothing writes pf_blanket in this configuration, so the
+ * verdict branch below is compile-time constant true.
+ */
+static bool pf_blanket = true;
+#endif
 
 static inline bool pf_appid_applicable(unsigned int appid)
 {
@@ -147,6 +162,16 @@ bool prio_filter_blocks(enum prio_filter_site site, int which, int who)
 	return test_bit(pf_appid_of(who) - PF_APPID_FIRST, pf_bitmap);
 }
 EXPORT_SYMBOL_GPL(prio_filter_blocks);
+
+/*
+ * The userspace control interface (CONFIG_PRIO_FILTER_CONTROL): everything
+ * below exists only when the interface is compiled in.  Without it these
+ * functions are absent and no /sys/module/prio_filter exists at all - a
+ * built-in driver only gets that directory via kobject_create_and_add()
+ * below or a registered module_param (there is none), and the blank
+ * pf_blanket default from above makes every cross-app read answer -ESRCH.
+ */
+#ifdef CONFIG_PRIO_FILTER_CONTROL
 
 /*
  * /sys/module/prio_filter/command, 0200 root:root:
@@ -294,9 +319,11 @@ static const struct attribute_group pf_attr_group = {
 };
 
 static struct kobject *pf_kobj;
+#endif /* CONFIG_PRIO_FILTER_CONTROL */
 
 static int __init prio_filter_init(void)
 {
+#ifdef CONFIG_PRIO_FILTER_CONTROL
 	int ret;
 
 	pf_kobj = kobject_create_and_add("prio_filter", &module_kset->kobj);
@@ -310,6 +337,13 @@ static int __init prio_filter_init(void)
 	}
 
 	pr_info("ready: /sys/module/prio_filter (empty set, filtering disabled)\n");
+#else
+	/*
+	 * Interface-less build: no device-visible control path at all; the
+	 * blanket default in pf_blanket cannot be changed at runtime.
+	 */
+	pr_info("ready: blanket mode, no control interface\n");
+#endif
 	return 0;
 }
 fs_initcall(prio_filter_init);
