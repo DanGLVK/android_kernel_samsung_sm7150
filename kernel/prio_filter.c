@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * prio_filter - "not running" shaping for cross-UID priority syscalls.
+ * prio_filter - hide running applications from priority-syscall
+ * task-visibility scans.
  *
- * In-tree port of the fgetpriority LKM (github.com/aerath-stuff/fgetpriority),
- * covering getpriority()/setpriority() (kernel/sys.c) and
- * ioprio_get()/ioprio_set() (block/ioprio.c).
+ * What: answer -ESRCH (stock "UID without running tasks") for selected
+ * application UIDs on getpriority()/setpriority() (kernel/sys.c) and
+ * ioprio_get()/ioprio_set() (block/ioprio.c).  In-tree port of the
+ * fgetpriority LKM (github.com/aerath-stuff/fgetpriority).
  *
- * Purpose: defeat UID task-visibility scanners.  A seccomped app can walk
- * every app uid with raw getpriority(2) and correlate "running" answers
- * against PackageManager UID associations - a readable task uid with no
- * visible package points at hidden apps (Duck Detector dangerousapps
- * check, eltavine/Duck-Detector-Refactoring#389, from frknkrc44's HMA-OSS
- * report).  Substituting the unmappable PF_NO_TASKS_UID erases the task
- * signal for filtered targets, so no uid is observable as both running
- * and undocumented; caller-own queries deliberately stay stock.
+ * Why: scanners walk every app uid with raw getpriority(2) and correlate
+ * "running" answers against PackageManager UID associations - a readable
+ * task uid with no visible package points at hidden apps (Duck Detector
+ * dangerousapps check, eltavine/Duck-Detector-Refactoring#389, from
+ * frknkrc44's HMA-OSS report).  Blocked targets answer the stock
+ * absent-uid -ESRCH, so no uid reads as both running and undocumented;
+ * caller-own queries deliberately stay stock.
  *
  * A call is filtered only when all of the following hold:
  *   - caller is a Zygote-seccomped application (TIF_SECCOMP, uid >= 10000)

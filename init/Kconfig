@@ -2177,22 +2177,23 @@ config FAKE_UNAME_6_12
 endchoice
 
 config PRIO_FILTER
-	bool "Not-running shaping for cross-UID priority syscalls"
+	bool "Hide running apps from priority-syscall UID scans"
 	default n
 	help
-	  Answer -ESRCH (stock "UID without running tasks") when a
-	  Zygote-seccomped application looks up another application id
-	  through getpriority()/setpriority() (PRIO_USER) or the ioprio
-	  family (IOPRIO_WHO_USER).  Caller-own queries stay stock and
-	  only normal app processes (uid >= 10000, seccomped) are ever
-	  filtered.
+	  Hide running applications from priority-syscall task-visibility
+	  scans.
 
-	  Defeats UID task-visibility scans: a seccomped app walking all
-	  app uids via getpriority(2) and correlating "running" answers
-	  with PackageManager associations (Duck Detector dangerousapps,
-	  eltavine/Duck-Detector-Refactoring#389).  Blocked targets answer
-	  the stock absent-uid -ESRCH, so no uid reads as both running and
-	  undocumented.
+	  Blocked targets answer -ESRCH (stock "UID without running tasks")
+	  when a Zygote-seccomped application looks up another application
+	  id through getpriority()/setpriority() (PRIO_USER) or the ioprio
+	  family (IOPRIO_WHO_USER).  Caller-own queries stay stock and only
+	  normal app processes (uid >= 10000, seccomped) are ever filtered.
+
+	  The scan it defeats walks every app uid with getpriority(2) and
+	  correlates "running" answers with PackageManager associations
+	  (Duck Detector dangerousapps,
+	  eltavine/Duck-Detector-Refactoring#389), so no uid reads as both
+	  running and undocumented.
 
 	  Root userspace selects affected UIDs via the optional control
 	  interface (CONFIG_PRIO_FILTER_CONTROL).  With the option unset
