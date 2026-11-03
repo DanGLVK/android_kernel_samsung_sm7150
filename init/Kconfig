@@ -2187,6 +2187,13 @@ config PRIO_FILTER
 	  only normal app processes (uid >= 10000, seccomped) are ever
 	  filtered.
 
+	  Defeats UID task-visibility scans: a seccomped app walking all
+	  app uids via getpriority(2) and correlating "running" answers
+	  with PackageManager associations (Duck Detector dangerousapps,
+	  eltavine/Duck-Detector-Refactoring#389).  Blocked targets answer
+	  the stock absent-uid -ESRCH, so no uid reads as both running and
+	  undocumented.
+
 	  Root userspace selects affected UIDs via the optional control
 	  interface (CONFIG_PRIO_FILTER_CONTROL).  With the option unset
 	  or an empty bitmap the syscalls are bit-for-bit stock.  Built
