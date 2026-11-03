@@ -2180,23 +2180,17 @@ config PRIO_FILTER
 	bool "Not-running shaping for cross-UID priority syscalls"
 	default n
 	help
-	  Answer -ESRCH (stock "UID without running tasks" answer) instead of
-	  the usual results when a Zygote-seccomped application looks up
-	  another application id through getpriority(PRIO_USER, ...),
-	  setpriority(PRIO_USER, ...), ioprio_get(IOPRIO_WHO_USER, ...) or
-	  ioprio_set(IOPRIO_WHO_USER, ...).
+	  Answer -ESRCH (stock "UID without running tasks") when a
+	  Zygote-seccomped application looks up another application id
+	  through getpriority()/setpriority() (PRIO_USER) or the ioprio
+	  family (IOPRIO_WHO_USER).  Caller-own queries stay stock and
+	  only normal app processes (uid >= 10000, seccomped) are ever
+	  filtered.
 
-	  Root userspace selects which UIDs are affected by writing
-	  /sys/module/prio_filter/command (enable/disable/reset) and reports
-	  state via /sys/module/prio_filter/state (bitmap hex dump).  Only
-	  normal app processes (uid >= 10000, seccomped) are ever filtered,
-	  caller-own queries are always answered normally and invalid
-	  `which` / ioprio class arguments keep their stock -EINVAL paths.
-
-	  Built into your kernel image with CONFIG_PRIO_FILTER=y (modules are
-	  unsupported).  With the option unset, or with an empty bitmap, the
-	  syscalls are bit-for-bit stock, so this stays userspace-safe until
-	  explicitly configured.
+	  Root userspace selects affected UIDs via the optional control
+	  interface (CONFIG_PRIO_FILTER_CONTROL).  With the option unset
+	  or an empty bitmap the syscalls are bit-for-bit stock.  Built
+	  into the kernel image (modules unsupported).
 
 config PRIO_FILTER_CONTROL
 	bool "Expose the sysfs control interface"
@@ -2204,20 +2198,14 @@ config PRIO_FILTER_CONTROL
 	default n
 	help
 	  Create /sys/module/prio_filter/{command,mode,state} so root
-	  userspace (the fgetp tool) can seed the per-application bitmap and
-	  switch verdict modes at runtime.  Default for managed kernels:
-	  select =y in the target defconfig when fgetp is in use.
+	  userspace (fgetp) can seed the per-application bitmap and switch
+	  verdict modes at runtime (hma: only bitmap hits answer -ESRCH).
+	  Select =y in managed kernels that drive it with fgetp.
 
 	  If unset (=n), the interface does not exist and the filter runs
-	  blanket mode permanently: every cross-application priority lookup
-	  answers -ESRCH (caller-own queries stay stock) with no bits seeded
-	  and nothing to configure.  Nothing in the device tree exposes the
-	  feature's state beyond dmesg lines at init.  This mirrors upstream
-	  fgetpriority's stock posture, whose module ships an empty whitelist
-	  (all cross-app appids read as "not running" until entries are
-	  added).  Blanket verdicts cost one constant-true branch, so the
-	  interface-off build remains as cheap as the interface-on one on
-	  hot paths.
+	  blanket mode permanently: every cross-app priority lookup answers
+	  -ESRCH, mirroring upstream fgetpriority's shipped empty-whitelist
+	  posture with nothing to configure.
 
 source "kernel/Kconfig.locks"
 

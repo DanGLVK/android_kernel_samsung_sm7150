@@ -2,64 +2,24 @@
 /*
  * prio_filter - "not running" shaping for cross-UID priority syscalls.
  *
- * Direct in-tree port of the fgetpriority LKM (which patched syscall table
- * slot 141, getpriority, with an unused-slot control channel) to an in-tree,
- * built-in-only implementation, extended per upstream request to also cover
- *:
- *   sys_getpriority()   kernel/sys.c
- *   sys_setpriority()   kernel/sys.c
- *   sys_ioprio_get()    block/ioprio.c
- *   sys_ioprio_set()    block/ioprio.c
+ * In-tree port of the fgetpriority LKM (github.com/aerath-stuff/fgetpriority),
+ * covering getpriority()/setpriority() (kernel/sys.c) and
+ * ioprio_get()/ioprio_set() (block/ioprio.c).
  *
- * Origin: fgetpriority (local project, fgetpriority/kernel/routine.c).
- * Custom feature: no upstream / Qualcomm / Samsung equivalent exists for
- * per-UID priority-hiding (checked torvalds/linux and CAF priority syscall
- * implementations).  CONFIG_PRIO_FILTER defaults to n and the bitmap is
- * empty at boot, so stock behaviour is preserved bit-for-bit until root
- * userspace makes a UID visible to it.  Root-only control lives at
- * /sys/module/prio_filter/{command,state}; hide that path with SUSFS or any
- * other hiding layer if desired.  The interface itself is optional
- * (CONFIG_PRIO_FILTER_CONTROL): when compiled out the filter runs
- * blanket-locked with no device-visible control path at all (see the
- * pf_blanket note below).
+ * A call is filtered only when all of the following hold:
+ *   - caller is a Zygote-seccomped application (TIF_SECCOMP, uid >= 10000)
+ *   - `which` selects PRIO_USER / IOPRIO_WHO_USER (target != caller)
+ *   - the target appid (uid % 100000) is in [10000, 20000) and either has
+ *     its bitmap bit set (hma mode) or blanket mode is on
+ * and a hit answers -ESRCH by substituting the unmappable PF_NO_TASKS_UID
+ * and letting the stock body run (see include/linux/prio_filter.h for the
+ * mechanism, timing and upstream credits).
  *
- * Semantics (mirrors fgetpriority's getpriority_should_swap() as closely as
- * the API differs):
- *  - caller must be a Zygote-seccomped application (TIF_SECCOMP, uid >= 10000)
- *  - which must select PRIO_USER (2) / IOPRIO_WHO_USER (3)
- *  - the target may not be the caller itself (recognise-yourself controls)
- *  - the target application id (uid % 100000) must fall in [10000, 20000)
- *    and have its bit set by root
- * and if all of that holds the friendly answer is -ESRCH, which is the
- * stock kernel's own answer for "UID without running tasks" — see
- * kernel/sys.c (error = -ESRCH before the switch) and block/ioprio.c
- * (ret = -ESRCH initial).  Invalid `which` / ioprio class values keep their
- * stock -EINVAL paths: call sites only call us after their own validation.
- *
- * Modes (with CONFIG_PRIO_FILTER_CONTROL=y, root-switchable via
- * /sys/module/prio_filter/command; default hma,
- * reset on every boot like the bitmap):
- *   hma     - a target answers -ESRCH when its appid bit is set; userspace
- *             fgetp seeds the bitmap from the HMA-OSS config.  Selective,
- *             aggregate scanners keep seeing plausible task counts.
- *   blanket - every cross-app app-uid target answers -ESRCH regardless of
- *             the bitmap (ported from upstream fgetpriority lkm@9863c182
- *             "Remove all service requirements").  Zero-config, but
- *             aggregate "task UIDs found" counters collapse to ~0 for
- *             scanning apps, which is itself a fingerprint.
- * The own-target exemption stays raw-uid equality in both modes.
- *
- * Answering mechanism (see PF_NO_TASKS_UID in include/linux/prio_filter.h):
- * on a hit the call site substitutes an unmappable uid ((uid_t)-1, sent
- * by upstream aerath-stuff/fgetpriority@9deff90 to replace the earlier
- * 99999 last-isolated-slot choice) and lets the unmodified syscall body
- * run, so errno *and* latency equal a plain absent-uid lookup — there is
- * no fast path for filtered targets and no timing signature to observe.
- * History: the original hook returned -ESRCH directly (fast-path latency
- * leak, documented 4727738838eb); local f93a82c2df28 equalized timing
- * inside the uid arms but was reverted for now; the dead-uid
- * substitution supersedes both, and (uid_t)-1 removes the only corner
- * the 99999 sentinel had (a live isolated process on the last uid).
+ * Root control (CONFIG_PRIO_FILTER_CONTROL=y) lives at
+ * /sys/module/prio_filter/{command,mode,state}, defaults to hma and is
+ * reset each boot like the bitmap.  With the interface compiled out the
+ * filter is blanket-locked (see the CONFIG help text).  Hide that sysfs
+ * path with SUSFS or any other hiding layer if desired.
  */
 
 #define pr_fmt(fmt) "prio_filter: " fmt
@@ -267,7 +227,9 @@ static ssize_t pf_command_store(struct kobject *kobj, struct kobj_attribute *att
  * /sys/module/prio_filter/mode, 0400 root:root:
  *   "hma"     - the bitmap decides (fgetp-seeded, the default)
  *   "blanket" - every app uid outside the caller's own reads as not running
- *               (bitmap still seedable but ignored by verdicts)
+ *               (bitmap still seedable but ignored by verdicts); zero-config,
+ *               but aggregate "task UIDs found" counters collapse to ~0 for
+ *               scanning apps, which is itself a fingerprint
  */
 static ssize_t pf_mode_show(struct kobject *kobj, struct kobj_attribute *attr,
 			    char *buf)

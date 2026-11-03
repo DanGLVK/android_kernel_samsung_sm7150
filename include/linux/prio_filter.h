@@ -3,13 +3,11 @@
  * prio_filter - answer "not running" for selected application UIDs on
  * cross-UID priority syscalls.
  *
- * Direct in-tree port of the fgetpriority LKM
- * (fgetpriority/kernel/routine.c, sys_call_table slot 141 hook), extended to
- * also shape setpriority(), ioprio_get() and ioprio_set().  Custom feature:
- * no upstream or Qualcomm/Samsung equivalent exists (checked torvalds/linux
- * and CAF priority syscall implementations); the behaviour is opt-in
- * (CONFIG_PRIO_FILTER=n by default, bitmap empty) and identical to stock for
- * ordinary callers, so no userspace ABI break.
+ * In-tree port of the fgetpriority LKM
+ * (github.com/aerath-stuff/fgetpriority), extended beyond its
+ * getpriority() hook to setpriority() and the ioprio family.  Opt-in
+ * (CONFIG_PRIO_FILTER default n, bitmap empty) and identical to stock
+ * for ordinary callers, so no userspace ABI break.
  */
 #ifndef _LINUX_PRIO_FILTER_H
 #define _LINUX_PRIO_FILTER_H
@@ -29,31 +27,20 @@ enum prio_filter_site {
 
 /*
  * An unmappable uid substituted for a hidden target before the stock
- * syscall body runs: no user_struct, no running tasks -> the stock code's
- * own absent-uid path answers -ESRCH (identical errno *and* identical
- * timing to querying any uid that is simply not running, so no fast-path
- * signature is observable).
+ * syscall body runs.  (uid_t)-1 is the kernel's INVALID_UID: uid_valid()
+ * is false, no user_struct/task can be attached to it, so the stock
+ * absent-uid path answers -ESRCH with the same errno *and* latency as
+ * querying an uid that is simply not running (no fast-path signature).
  *
- * (uid_t)-1 is the kernel's own INVALID_UID sentinel value, so uid_valid()
- * is false by construction and the pass-through intact: argument
- * validation still runs, no existing user_struct or task can be attached
- * to it, and setters cannot reach their permission checks against a real
- * process.  Mechanism credited to upstream fgetpriority (aerath-stuff/
- * fgetpriority@7e8360bf), which rewrites `who` in the syscall table hook
- * prologue; here the rewrite happens inside the syscall body instead.
+ * Mechanism credit: fgetpriority@7e8360bf, which rewrites `who` in its
+ * syscall-table hook prologue; here the rewrite happens inside the
+ * syscall body.  Sentinel value credit: fgetpriority@9deff90, whose
+ * (uid_t)-1 replaced the earlier 99999 choice (last isolated-uid slot)
+ * since isolated uids can hold live tasks.
  *
- * Sentinel value credit: upstream aerath-stuff/fgetpriority@9deff90
- * ("Use an invalid UID for filtered priority operations") superseded the
- * former 99999 choice, the last isolated-uid slot.  Isolated uids *can*
- * own live tasks (up to LAST_ISOLATED_UID), and a substituted uid that a
- * real process holds would be answered *for* rather than with -ESRCH;
- * (uid_t)-1 cannot ever be mapped to a kuid a task carries.
- *
- * Callers querying this sentinel itself are unaffected: the filter
- * verdict for it is false (pf_appid_of((uid_t)-1) = 67295, outside the
- * [10000, 19999) window), and a negative `who` bails at the same
- * guard the stock body runs first regardless - such a query is stock
- * all the way through.
+ * Queries passing who == -1 are stock: prio_filter_blocks() rejects
+ * negative `who` up front (pf_appid_of() would be 67295, outside the
+ * appid window).
  */
 #define PF_NO_TASKS_UID		((int)(uid_t)-1)
 
