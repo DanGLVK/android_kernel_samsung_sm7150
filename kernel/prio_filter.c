@@ -6,6 +6,15 @@
  * covering getpriority()/setpriority() (kernel/sys.c) and
  * ioprio_get()/ioprio_set() (block/ioprio.c).
  *
+ * Purpose: defeat UID task-visibility scanners.  A seccomped app can walk
+ * every app uid with raw getpriority(2) and correlate "running" answers
+ * against PackageManager UID associations - a readable task uid with no
+ * visible package points at hidden apps (Duck Detector dangerousapps
+ * check, eltavine/Duck-Detector-Refactoring#389, from frknkrc44's HMA-OSS
+ * report).  Substituting the unmappable PF_NO_TASKS_UID erases the task
+ * signal for filtered targets, so no uid is observable as both running
+ * and undocumented; caller-own queries deliberately stay stock.
+ *
  * A call is filtered only when all of the following hold:
  *   - caller is a Zygote-seccomped application (TIF_SECCOMP, uid >= 10000)
  *   - `which` selects PRIO_USER / IOPRIO_WHO_USER (target != caller)
