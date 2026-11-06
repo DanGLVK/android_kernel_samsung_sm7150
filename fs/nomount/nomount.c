@@ -104,15 +104,16 @@ static struct nm_leaf *nm_find_leaf_in_dir(struct nm_dir_node *dir_node, const c
     return leaf;
 }
 
-static bool nm_path_unchanged(struct dentry *d, const struct dentry *saved_parent,
-                              const char *name, u16 namelen)
+static bool nm_path_unchanged(struct dentry *d, const struct dentry *saved_parent, const char *name, u16 namelen)
 {
     bool unchanged;
     unsigned seq;
 
     do {
         seq = raw_seqcount_begin(&d->d_seq);
-        unchanged = !d_unlinked(d) && d->d_parent == saved_parent && d->d_name.len == namelen && !memcmp(d->d_name.name, name, namelen);
+        unchanged = d->d_parent == saved_parent && d->d_name.len == namelen &&
+                    !memcmp(d->d_name.name, name, namelen) &&
+                    !(d_unhashed(d) && !IS_ROOT(d) && (!d_inode(d) || d_inode(d)->i_nlink == 0));
     } while (read_seqcount_retry(&d->d_seq, seq));
 
     return unchanged;
@@ -546,14 +547,20 @@ static int nm_release(struct inode *inode, struct file *file)
 static loff_t nm_llseek(struct file *file, loff_t offset, int whence)
 {
     struct file *real_file = file->private_data;
-    loff_t res;
-    if (!real_file) return -EINVAL;
+    loff_t pos;
 
-    real_file->f_pos = file->f_pos;
-    res = vfs_llseek(real_file, offset, whence);
-    file->f_pos = real_file->f_pos;
-
-    return res;
+    switch (whence) {
+    case SEEK_SET: pos = offset; break;
+    case SEEK_CUR: pos = file->f_pos + offset; break;
+    case SEEK_END: pos = i_size_read(file_inode(real_file)) + offset; break;
+    case SEEK_DATA:
+    case SEEK_HOLE:
+        return vfs_llseek(real_file, offset, whence);
+    default: return -EINVAL;
+    }
+    if (pos < 0) return -EINVAL;
+    file->f_pos = pos;
+    return pos;
 }
 
 static ssize_t nm_read_iter(struct kiocb *iocb, struct iov_iter *to)
