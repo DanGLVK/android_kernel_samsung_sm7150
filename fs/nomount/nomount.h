@@ -76,7 +76,9 @@ struct nm_sop {
 struct nm_inode_info {
     struct path r_path;
     struct nm_dir_node *dir_node;
+    struct file *r_file;
     bool opaque;
+    bool backing_child;
     struct rcu_head rcu;
 };
 
@@ -191,7 +193,6 @@ static const struct inode_operations nm_file_iops;
 static const struct file_operations nm_dir_fops;
 static const struct inode_operations nm_dir_iops;
 static const struct dentry_operations nm_dops;
-static const struct dentry_operations nm_owned_dops;
 
 /*** forward declarations ***/
 static struct dentry *nm_hijacked_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags);
@@ -200,6 +201,7 @@ static void nm_hijacked_evict_inode(struct inode *inode);
 static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool injected);
 static void nm_dir_put(struct nm_dir_node *dir_node);
 static void nm_shutdown_release(void);
+static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid, unsigned int uid_end, unsigned int deny_start, unsigned int deny_end);
 static void nm_clear_state(int clear_flags);
 
 /* =====================================================================
@@ -379,6 +381,12 @@ struct nm_del_hdr {
     #define FLAGS_VAL /* Nothing */
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+# define nm_lookup_one_len_unlocked(name, dentry, len) lookup_one_unlocked(&nop_mnt_idmap, &(struct qstr)QSTR_INIT((name), (len)), dentry)
+#else
+# define nm_lookup_one_len_unlocked lookup_one_len_unlocked
+#endif
+
 #ifndef for_each_alias
 #define for_each_alias(dentry, inode) \
     hlist_for_each_entry(dentry, &(inode)->i_dentry, d_u.d_alias)
@@ -490,6 +498,28 @@ static bool nm_is_pseudo_fs(struct super_block *sb)
     default:
         return false;
     }
+}
+
+static bool nm_dir_lookup_tolerates_cross_sb(struct super_block *sb)
+{
+    switch (sb->s_magic) {
+    case F2FS_SUPER_MAGIC:
+    case EXT4_SUPER_MAGIC:
+#if defined(EROFS_SUPER_MAGIC_V1) && BITS_PER_LONG == 64
+    case EROFS_SUPER_MAGIC_V1:
+#endif
+    case SQUASHFS_MAGIC:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline int nm_drop_dentry(struct dentry *dentry, unsigned int flags, bool weak)
+{
+    if (flags & LOOKUP_RCU) return -ECHILD;
+    d_drop(dentry);
+    return weak ? -ESTALE : 0;
 }
 
 /* RCU read lock scope guard */
