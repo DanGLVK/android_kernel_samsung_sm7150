@@ -76,6 +76,8 @@
 #undef CONFIG_COMPAT
 #endif
 
+#include "downstream/syscall_table_common.h"
+
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs.h>
 #endif // #ifdef CONFIG_KSU_SUSFS
@@ -173,7 +175,8 @@
 #ifdef CONFIG_KSU_HACK_ARM64_BRANCH_LINK
 #undef syscall_table_sucompat_enable
 #undef syscall_table_sucompat_disable
-#include "hook/syscall_table_hook_arm64.c" // included as fallback
+#include "hook/syscall_table_hook_arm64.c"
+#include "hook/syscall_table_mirror.c"		// attempt to mirror sct
 #include "hook/branch_link_hook_arm64.c"
 #endif
 
@@ -264,9 +267,6 @@ static int __init kernelsu_init(void)
 		return -ENOSYS;
 	}
 
-#ifdef KSU_CAN_USE_MODULE_BLACKLIST
-	ksu_module_blacklist_init(); // Block modules early, before vendor modules are loaded in second stage.
-#endif
 	// register features
 	ksu_feature_init();
 	ksu_sucompat_init();
@@ -299,6 +299,10 @@ static int __init kernelsu_init(void)
 
 #ifdef CONFIG_KSU_HACK_ARM64_BRANCH_LINK
 	ksu_branch_link_patch_init();
+#endif
+
+#ifdef KSU_CAN_USE_MODULE_BLACKLIST
+	ksu_module_blacklist_init(); // Block modules early, before vendor modules are loaded in second stage.
 #endif
 
 #ifdef CONFIG_KSU_SUSFS
