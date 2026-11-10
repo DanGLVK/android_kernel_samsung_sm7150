@@ -39,26 +39,6 @@ static __always_inline bool nm_child_matches(struct nm_leaf *leaf, const char *n
     return child_name[0] == name[0] && child_name[len - 1] == name[len - 1] && !memcmp(child_name, name, len);
 }
 
-static __always_inline struct nm_leaf *nm_bsearch_child(struct nm_child_array *arr, const char *name, size_t len, u32 hash, int *index)
-{
-	struct nm_child *entries = nm_entries(arr);
-	int l = 0, n = arr->count;
-
-	while (n > 0) {
-		int step = n >> 1, m = l + step, less = (entries[m].hash < hash), mask = -less;
-		l += (step + 1) & mask;
-		n = step + ((n - (step << 1) - 1) & mask);
-    }
-	if (index) *index = l;
-	while (l < arr->count && entries[l].hash == hash) {
-		struct nm_leaf *leaf = entries[l].leaf;
-		if (nm_child_matches(leaf, name, len))
-			return leaf;
-		l++;
-	}
-	return NULL;
-}
-
 static bool nm_rules_overlap(const struct nm_rule *a, const struct nm_rule *b)
 {
     unsigned int lo = max(a->target_uid, b->target_uid), hi = min(a->uid_end, b->uid_end);
@@ -92,24 +72,22 @@ static struct nm_rule *nm_select_rule(struct nm_leaf *leaf, unsigned int uid)
 static struct nm_leaf *nm_find_leaf_in_dir(struct nm_dir_node *dir_node, const char *name, size_t len)
 {
     struct nm_child_array *children;
-    struct nm_leaf *leaf = NULL;
+    struct nm_leaf **entries;
+    u32 bucket, i;
 
-    if (!dir_node || !(children = rcu_dereference(dir_node->children)))
+    if (!dir_node || !(children = rcu_dereference_check(dir_node->children, lockdep_is_held(&nm_mutex))))
         return NULL;
-    u32 bloom_h = nm_qhash(name, len);
-    if (!children->bloom_words) {
-        struct nm_child *entries = nm_entries(children);
-        for (int i = 0; i < children->count; i++) {
-            if (entries[i].bloom_hash == bloom_h && nm_child_matches(entries[i].leaf, name, len)) {
-                leaf = entries[i].leaf;
-                break;
-            }
-        }
-    } else if (unlikely(nm_bloom_test(children, bloom_h))) {
-        u32 hash = full_name_hash((const void *)(unsigned long)NM_MAGIC_SIG, name, len);
-        leaf = nm_bsearch_child(children, name, len, hash, NULL);
+    entries = nm_entries(children);
+    if (!children->bucket_count) {
+        for (i = 0; i < children->count; i++)
+            if (nm_child_matches(entries[i], name, len))
+                return entries[i];
+        return NULL;
     }
-    return leaf;
+    bucket = nm_child_bucket(children, full_name_hash((const void *)(unsigned long)NM_MAGIC_SIG, name, len));
+    for (i = children->starts[bucket]; i < children->starts[bucket + 1]; i++)
+        if (nm_child_matches(entries[i], name, len)) return entries[i];
+    return NULL;
 }
 
 static bool nm_path_unchanged(struct dentry *d, const struct dentry *saved_parent, const char *name, u16 namelen)
@@ -261,7 +239,7 @@ static inline void nm_emit_virtual_children(struct dir_context *ctx, struct nm_d
 		rcu_read_lock();
 		struct nm_child_array *array = rcu_dereference(dir_node->children);
 		if (array && id < (u32)array->count) {
-			struct nm_leaf *leaf = nm_entries(array)[id].leaf;
+			struct nm_leaf *leaf = nm_entries(array)[id];
 			struct nm_rule *rule = nm_select_rule(leaf, fsuid);
 			has_more = true;
 			if (rule && !(rule->flags & NM_FLAG_WHITEOUT) && (!native_view || nm_rule_needs_readdir(leaf, rule))) {
@@ -537,7 +515,7 @@ static int nm_hijacked_unlink(struct inode *dir, struct dentry *dentry)
     return 0;
 
 do_real_unlink:
-    if (inode && nm_inode_is_virtual(inode)) return -ENOENT;
+    if (nm_inode_is_virtual(inode)) return -ENOENT;
     if (nm_iop && nm_iop->orig_iop && nm_iop->orig_iop->unlink)
         return nm_iop->orig_iop->unlink(dir, dentry);
     return -EPERM;
@@ -947,23 +925,14 @@ static int nm_xattr_set(const struct xattr_handler *handler, IDMAP_ARG struct de
     struct nm_xattr_proxy *proxy = container_of(handler, struct nm_xattr_proxy, fake);
     if (nm_inode_is_virtual(inode)) {
         struct nm_inode_info *info = inode->i_private;
-        const char *full_name = xattr_full_name(handler, name);
-        struct inode *r_inode;
-        bool same_sb;
-        int err;
+        const char *full_name;
 
         if (unlikely(!info || !info->r_path.dentry)) return -ENODATA;
-        r_inode = d_backing_inode(info->r_path.dentry);
-        same_sb = r_inode->i_sb == inode->i_sb;
-        if (sb_rdonly(r_inode->i_sb)) return -EROFS;
-        if (!same_sb) sb_start_write(r_inode->i_sb);
+        if (sb_rdonly(d_backing_inode(info->r_path.dentry)->i_sb)) return -EROFS;
+        full_name = xattr_full_name(handler, name);
         if (buffer)
-            err = vfs_setxattr(IDMAP_PATH(info->r_path) info->r_path.dentry, full_name, buffer, size, flags);
-        else
-            err = vfs_removexattr(IDMAP_PATH(info->r_path) info->r_path.dentry, full_name);
-
-        if (!same_sb) sb_end_write(r_inode->i_sb);
-        return err;
+            return vfs_setxattr(IDMAP_PATH(info->r_path) info->r_path.dentry, full_name, buffer, size, flags);
+        return vfs_removexattr(IDMAP_PATH(info->r_path) info->r_path.dentry, full_name);
     }
     return proxy->orig->set(proxy->orig, IDMAP_CALL dentry, inode, name, buffer, size, flags);
 }
@@ -1354,15 +1323,47 @@ static struct nm_dir_node *nm_alloc_dir_node(void)
     return dir_node;
 }
 
-static struct nm_child_array *nm_alloc_child_array(int count, u16 bloom_words)
+static struct nm_child_array *nm_alloc_child_array(int count)
 {
-    size_t sz = sizeof(struct nm_child_array) + bloom_words * sizeof(u64) + count * sizeof(struct nm_child);
+    u16 buckets = nm_child_buckets_for(count);
+    size_t sz = ALIGN(sizeof(struct nm_child_array) + (buckets + 1) * sizeof(u32), 8) + count * sizeof(struct nm_leaf *);
     struct nm_child_array *array = kmalloc(sz, GFP_KERNEL);
     if (array) {
         array->count = count;
-        array->bloom_words = bloom_words;
+        array->bucket_count = buckets;
     }
     return array;
+}
+
+static void nm_rebuild_children(struct nm_child_array *array, struct nm_child_array *old, struct nm_leaf *extra, int skip)
+{
+    int count = old ? old->count : 0;
+    struct nm_leaf **entries = nm_entries(array);
+    u16 b;
+
+    if (!array->bucket_count) {
+        int at = 0;
+        for (int i = 0; i < count; i++)
+            if (i != skip) entries[at++] = nm_entries(old)[i];
+        if (extra) entries[at] = extra;
+        return;
+    }
+
+    memset(array->starts, 0, (array->bucket_count + 1) * sizeof(u32));
+    for (int i = 0; i < count; i++)
+        if (i != skip) array->starts[nm_child_bucket(array, nm_entries(old)[i]->child_hash)]++;
+    if (extra) array->starts[nm_child_bucket(array, extra->child_hash)]++;
+
+    for (b = 1; b <= array->bucket_count; b++)
+        array->starts[b] += array->starts[b - 1];
+
+    for (int i = count - 1; i >= 0; i--) {
+        if (i == skip) continue;
+        struct nm_leaf *leaf = nm_entries(old)[i];
+        entries[--array->starts[nm_child_bucket(array, leaf->child_hash)]] = leaf;
+    }
+    if (extra)
+        entries[--array->starts[nm_child_bucket(array, extra->child_hash)]] = extra;
 }
 
 static bool nm_rules_need_readdir(struct nm_leaf *leaf, struct nm_rule_array *rules)
@@ -1390,29 +1391,23 @@ static void nm_publish_child_view_locked(struct nm_dir_node *dir_node, struct nm
 static int nm_inject_child_locked(struct nm_dir_node *dir_node, struct nm_leaf *leaf, const char *name, size_t name_len)
 {
     struct nm_child_array *array, *old = rcu_dereference_protected(dir_node->children, lockdep_is_held(&nm_mutex));
-    int count = old ? old->count : 0, pos = 0;
-    u32 full_h = full_name_hash((const void *)(unsigned long)NM_MAGIC_SIG, name, name_len);
-    u32 bloom_h = nm_qhash(name, name_len);
+    int count = old ? old->count : 0;
 
-    if (old && nm_bsearch_child(old, name, name_len, full_h, &pos)) return -EEXIST;
-    if (!(array = nm_alloc_child_array(count + 1, nm_bloom_words_for(count + 1)))) return -ENOMEM;
-
-    if (old) {
-        memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_child));
-        memcpy(nm_entries(array) + pos + 1, nm_entries(old) + pos, (count - pos) * sizeof(struct nm_child));
-    }
-    if (array->bloom_words) {
-        if (old && array->bloom_words == old->bloom_words) {
-            memcpy(array->bloom, old->bloom, old->bloom_words * sizeof(u64));
-        } else {
-            memset(array->bloom, 0, array->bloom_words * sizeof(u64));
-            for (int i = 0; i < count; i++)
-                nm_bloom_set(array, nm_entries(old)[i].bloom_hash);
-        }
-        nm_bloom_set(array, bloom_h);
-    }
-    nm_entries(array)[pos] = (struct nm_child){ .hash = full_h, .bloom_hash = bloom_h, .leaf = leaf };
+    if (nm_find_leaf_in_dir(dir_node, name, name_len)) return -EEXIST;
     leaf->child_len = name_len;
+    leaf->child_hash = full_name_hash((const void *)(unsigned long)NM_MAGIC_SIG, name, name_len);
+
+    if (!(array = nm_alloc_child_array(count + 1))) return -ENOMEM;
+    if (old && old->bucket_count && array->bucket_count == old->bucket_count) {
+        u32 bucket = nm_child_bucket(array, leaf->child_hash), pos = old->starts[bucket + 1];
+        u16 i;
+        for (i = 0; i <= bucket; i++) array->starts[i] = old->starts[i];
+        for (; i <= array->bucket_count; i++) array->starts[i] = old->starts[i] + 1;
+        memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_leaf *));
+        nm_entries(array)[pos] = leaf;
+        memcpy(nm_entries(array) + pos + 1, nm_entries(old) + pos, (count - pos) * sizeof(struct nm_leaf *));
+    } else nm_rebuild_children(array, old, leaf, -1);
+
     leaf->parent_dir = dir_node;
     atomic_inc(&dir_node->refs);
     if (nm_rules_need_readdir(leaf, rcu_dereference_protected(leaf->rules, lockdep_is_held(&nm_mutex))))
@@ -1425,23 +1420,29 @@ static struct nm_dir_node *nm_delete_child_locked(struct nm_leaf *leaf, bool cle
 {
     struct nm_dir_node *dir_node = leaf->parent_dir;
     struct nm_child_array *old, *array = NULL;
-    int pos;
 
     if (!dir_node) return NULL;
     if (!(old = rcu_dereference_protected(dir_node->children, lockdep_is_held(&nm_mutex)))) return dir_node;
     if (!clear) {
-        for (pos = 0; pos < old->count && nm_entries(old)[pos].leaf != leaf; pos++) {}
-        if (pos == old->count) return dir_node;
+        u32 bucket = 0;
+        int pos = 0, end = old->count;
+        if (old->bucket_count) {
+            bucket = nm_child_bucket(old, leaf->child_hash);
+            pos = old->starts[bucket];
+            end = old->starts[bucket + 1];
+        }
+        for (; pos < end && nm_entries(old)[pos] != leaf; pos++) {}
+        if (pos == end) return dir_node;
         if (old->count > 1) {
             int new_count = old->count - 1;
-            if (!(array = nm_alloc_child_array(new_count, nm_bloom_words_for(new_count)))) return ERR_PTR(-ENOMEM);
-            memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_child));
-            memcpy(nm_entries(array) + pos, nm_entries(old) + pos + 1, (old->count - pos - 1) * sizeof(struct nm_child));
-            if (array->bloom_words) {
-                memset(array->bloom, 0, array->bloom_words * sizeof(u64));
-                for (int i = 0; i < array->count; i++)
-                    nm_bloom_set(array, nm_entries(array)[i].bloom_hash);
-            }
+            if (!(array = nm_alloc_child_array(new_count))) return ERR_PTR(-ENOMEM);
+            if (array->bucket_count && array->bucket_count == old->bucket_count) {
+                u16 i;
+                for (i = 0; i <= bucket; i++) array->starts[i] = old->starts[i];
+                for (; i <= array->bucket_count; i++) array->starts[i] = old->starts[i] - 1;
+                memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_leaf *));
+                memcpy(nm_entries(array) + pos, nm_entries(old) + pos + 1, (new_count - pos) * sizeof(struct nm_leaf *));
+            } else nm_rebuild_children(array, old, NULL, pos);
         }
     }
     nm_publish_child_view_locked(dir_node, array);
@@ -1467,16 +1468,13 @@ static struct nm_rule_array *nm_alloc_rule_array(int count, size_t heap_size)
     return arr;
 }
 
-static int nm_prepare_rule(const char *r_path, u16 r_len, u32 flags, unsigned int uid, unsigned int uid_end,
+static int nm_prepare_rule(const char *r_path, u32 flags, unsigned int uid, unsigned int uid_end,
                            unsigned int deny_start, unsigned int deny_end, struct nm_rule *out, struct name_snapshot *name)
 {
     bool backed = !(flags & (NM_FLAG_WHITEOUT | NM_FLAG_VIRTUAL_DIR));
     if (backed && !r_path) return -EINVAL;
-    if (backed) while (r_len > 1 && r_path[r_len - 1] == '/') r_len--;
-    else r_len = 0;
 
     memset(out, 0, sizeof(*out));
-    out->r_len = r_len;
     out->flags = flags;
     out->target_uid = uid;
     out->uid_end = uid_end;
@@ -1519,22 +1517,16 @@ static int nm_prepare_rule(const char *r_path, u16 r_len, u32 flags, unsigned in
     return 0;
 }
 
-static inline size_t nm_rule_heap_size(const struct nm_rule *rule)
-{
-    return rule->r_len + rule->r_name_len;
-}
-
-static inline char *nm_copy_rule(struct nm_rule *dst, const struct nm_rule *src, char *dst_h, const char *src_h)
+static inline char *nm_copy_rule(struct nm_rule *dst, const struct nm_rule *src, char *dst_h)
 {
     *dst = *src;
     if (dst->r_path.dentry) path_get(&dst->r_path);
     if (dst->r_parent) dget(dst->r_parent);
-    memcpy(dst_h, src_h, src->r_len);
     if (src->r_name) {
-        dst->r_name = dst_h + src->r_len;
-        memcpy(dst_h + src->r_len, src->r_name, src->r_name_len);
+        dst->r_name = dst_h;
+        memcpy(dst_h, src->r_name, src->r_name_len);
     }
-    return dst_h + nm_rule_heap_size(src);
+    return dst_h + src->r_name_len;
 }
 
 static struct nm_leaf *nm_alloc_leaf(const char *path, u16 len)
@@ -1841,13 +1833,9 @@ static int nm_add_rule_locked(const char *v_path, const char *r_path, u16 v_len,
     }
 
     char *r_buf = NULL;
-    if (r_path && r_len) {
-        if (!(r_buf = kmalloc(r_len + 1, GFP_KERNEL))) return -ENOMEM;
-        memcpy(r_buf, r_path, r_len);
-        r_buf[r_len] = '\0';
-    }
+    if (r_path && r_len && !(r_buf = kmemdup_nul(r_path, r_len, GFP_KERNEL))) return -ENOMEM;
 
-    err = nm_prepare_rule(r_buf, r_len, flags, uid, uid_end, deny_start, deny_end, &new_rule, &name);
+    err = nm_prepare_rule(r_buf, flags, uid, uid_end, deny_start, deny_end, &new_rule, &name);
     if (err) { kfree(r_buf); return err; }
 
     while (v_len > 1 && v_path[v_len - 1] == '/') v_len--;
@@ -1882,13 +1870,11 @@ static int nm_add_rule_locked(const char *v_path, const char *r_path, u16 v_len,
         goto out_leaf;
     }
 
-    if (old) {
-        for (int i = 0; i < count; i++) {
-            if (replace && i == pos) continue;
-            heap_size += nm_rule_heap_size(&old->rules[i]);
-        }
+    for (int i = 0; i < count; i++) {
+        if (replace && i == pos) continue;
+        heap_size += old->rules[i].r_name_len;
     }
-    heap_size += nm_rule_heap_size(&new_rule);
+    heap_size += new_rule.r_name_len;
 
     if (!(array = nm_alloc_rule_array(new_count, heap_size))) {
         err = -ENOMEM;
@@ -1896,23 +1882,9 @@ static int nm_add_rule_locked(const char *v_path, const char *r_path, u16 v_len,
     }
 
     char *new_h = nm_rule_heap(array);
-    if (old) {
-        const char *old_h = nm_rule_heap(old);
-        for (int i = 0; i < pos; i++, j++) {
-            new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h, old_h);
-            old_h += nm_rule_heap_size(&old->rules[i]);
-        }
-        if (replace) old_h += nm_rule_heap_size(&old->rules[pos]);
-
-        new_h = nm_copy_rule(&array->rules[j++], &new_rule, new_h, r_buf);
-
-        for (int i = pos + replace; i < count; i++, j++) {
-            new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h, old_h);
-            old_h += nm_rule_heap_size(&old->rules[i]);
-        }
-    } else {
-        nm_copy_rule(&array->rules[0], &new_rule, new_h, r_buf);
-    }
+    for (int i = 0; i < pos; i++, j++) new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h);
+    new_h = nm_copy_rule(&array->rules[j++], &new_rule, new_h);
+    for (int i = pos + replace; i < count; i++, j++) new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h);
     array->uid_count = new_count - (!array->rules[0].target_uid && !array->rules[0].uid_end);
 
     if (new_dir) {
@@ -1963,7 +1935,7 @@ static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid,
         stub_virtual = true;
     }
 
-    if (!stub_virtual && old->count == 1 && (!leaf->this_dir || !rcu_access_pointer(leaf->this_dir->children))) {
+    if (!stub_virtual && old->count == 1) {
         struct nm_dir_node *parent = nm_detach_leaf_locked(leaf);
         if (IS_ERR(parent)) return PTR_ERR(parent);
         return parent ? nm_prune_empty_virtual_dirs_locked(parent) : 0;
@@ -1972,26 +1944,24 @@ static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid,
     new_count = stub_virtual ? old->count : old->count - 1;
     for (int i = 0; i < old->count; i++) {
         if (i == pos) continue;
-        heap_size += nm_rule_heap_size(&old->rules[i]);
+        heap_size += old->rules[i].r_name_len;
     }
 
     if (!(array = nm_alloc_rule_array(new_count, heap_size))) return -ENOMEM;
 
     char *new_h = nm_rule_heap(array);
-    const char *old_h = nm_rule_heap(old);
     for (int i = 0, j = 0; i < old->count; i++) {
-        if (!stub_virtual && i == pos) { old_h += nm_rule_heap_size(&old->rules[i]); continue; }
+        if (!stub_virtual && i == pos) continue;
         if (stub_virtual && i == pos) {
             array->rules[j] = (struct nm_rule){
                 .target_uid = uid, .uid_end = uid_end,
                 .deny_start = deny_start, .deny_end = deny_end,
                 .flags = NM_FLAG_IS_DIR | NM_FLAG_VIRTUAL_DIR,
             };
-            j++; old_h += nm_rule_heap_size(&old->rules[i]);
+            j++;
             continue;
         }
-        new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h, old_h);
-        old_h += nm_rule_heap_size(&old->rules[i]);
+        new_h = nm_copy_rule(&array->rules[j], &old->rules[i], new_h);
         j++;
     }
     array->uid_count = new_count - (!array->rules[0].target_uid && !array->rules[0].uid_end);
@@ -2140,23 +2110,40 @@ static int nm_process_payload(unsigned long user_addr)
             hash_for_each_rcu(nm_leaves_ht, bkt, leaf, ht_node) {
                 struct nm_rule_array *rules = rcu_dereference(leaf->rules);
                 if (!rules) continue;
-                const char *heap = nm_rule_heap(rules);
                 for (int i = 0; i < rules->count; i++) {
                     struct nm_rule *r = &rules->rules[i];
-                    if (current_idx++ < payload->arg1) { heap += nm_rule_heap_size(r); continue; }
-                    if ((sizeof(struct nm_rule_hdr) + leaf->v_len + r->r_len) > (size_t)(buf_end - buf_ptr)) { current_idx--; goto list_done; }
+                    char *p = NULL;
+                    int r_len_str = 0;
+                    if (current_idx++ < payload->arg1) continue;
+
+                    size_t head_len = sizeof(struct nm_rule_hdr) + leaf->v_len;
+                    if (head_len > (size_t)(buf_end - buf_ptr)) goto list_full;
+                    if (r->r_path.dentry) {
+                        p = d_path(&r->r_path, buf_ptr + head_len, buf_end - (buf_ptr + head_len));
+                        if (IS_ERR(p)) {
+                            if (PTR_ERR(p) == -ENAMETOOLONG) goto list_full;
+                            payload->status = PTR_ERR(p);
+                            goto list_done;
+                        }
+                        r_len_str = strnlen(p, buf_end - p);
+                    }
+
+                    if (head_len + r_len_str > (size_t)(buf_end - buf_ptr)) goto list_full;
+                    if (p && p != buf_ptr + head_len) memmove(buf_ptr + head_len, p, r_len_str);
                     *(struct nm_rule_hdr *)buf_ptr = (struct nm_rule_hdr){
-                        .flags = r->flags, .v_len = leaf->v_len, .r_len = r->r_len,
+                        .flags = r->flags, .v_len = leaf->v_len, .r_len = r_len_str,
                         .uid = r->target_uid, .uid_end = r->uid_end,
                         .deny_start = r->deny_start, .deny_end = r->deny_end
                     };
                     buf_ptr += sizeof(struct nm_rule_hdr);
-                    memcpy(buf_ptr, leaf->paths, leaf->v_len); buf_ptr += leaf->v_len;
-                    if (r->r_len > 0) { memcpy(buf_ptr, heap, r->r_len); buf_ptr += r->r_len; }
-                    heap += nm_rule_heap_size(r);
+                    memcpy(buf_ptr, leaf->paths, leaf->v_len); buf_ptr += leaf->v_len + r_len_str;
                 }
             }
             current_idx = -1;
+            goto list_done;
+        list_full:
+            current_idx--;
+            if (current_idx == (int)payload->arg1) payload->status = -ENAMETOOLONG;
         list_done:
             payload->data_size = buf_ptr - payload->buffer;
             payload->arg1 = current_idx;
