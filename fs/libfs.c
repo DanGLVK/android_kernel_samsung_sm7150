@@ -26,6 +26,11 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#include <linux/susfs_def.h>
+extern bool susfs_is_inode_sus_path(struct inode *inode);
+#endif
+
 int simple_getattr(const struct path *path, struct kstat *stat,
 		   u32 request_mask, unsigned int query_flags)
 {
@@ -193,6 +198,17 @@ int dcache_readdir(struct file *file, struct dir_context *ctx)
 	struct list_head *anchor = &dentry->d_subdirs;
 	struct dentry *next = NULL;
 	struct list_head *p;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	/*
+	 * ramfs/tmpfs never hash their inodes, so the ilookup() based filter
+	 * in fs/readdir.c cannot resolve them and hidden names leak into the
+	 * listing while stat() already reports ENOENT. The dentries are right
+	 * here, so check the inode we already hold instead. The gate is
+	 * hoisted out of the loop: a process that is not an umounted app pays
+	 * a single register test per call, not per entry.
+	 */
+	bool hide_sus_path = susfs_is_current_proc_umounted_app();
+#endif
 
 	if (!dir_emit_dots(file, ctx))
 		return 0;
@@ -203,6 +219,13 @@ int dcache_readdir(struct file *file, struct dir_context *ctx)
 		p = &cursor->d_child;
 
 	while ((p = scan_positives(cursor, p, 1, &next)) != anchor) {
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+		if (hide_sus_path && susfs_is_inode_sus_path(d_inode(next))) {
+			dput(next);
+			next = NULL;
+			continue;
+		}
+#endif
 		if (!dir_emit(ctx, next->d_name.name, next->d_name.len,
 			      d_inode(next)->i_ino, dt_type(d_inode(next))))
 			break;
