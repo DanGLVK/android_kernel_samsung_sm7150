@@ -976,17 +976,20 @@ static struct sock *unix_find_other(struct net *net,
 		}
 	} else {
 		err = -ECONNREFUSED;
-#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
-		/* susfs: a umounted app must not be able to prove a listed abstract
-		 * listener exists by connecting to it, so answer exactly what an
-		 * abstract name nobody bound answers. The name bytes are already
-		 * in kernel space here (move_addr_to_kernel ran in __sys_connect).
-		 * 'len' covers sa_family + leading NUL + name bytes. */
-		if (susfs_unix_is_hidden(sunname->sun_path + 1,
-					 len - offsetof(struct sockaddr_un, sun_path) - 1))
-			goto fail;
-#endif
 		u = unix_find_socket_byname(net, sunname, len, type, hash);
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+		/* susfs: hide a listed abstract listener from a umounted app, but
+		 * never from the owner of the bound socket - a process that bound
+		 * the name itself must still reach its own socket, or bind success
+		 * followed by a refused self-connect would be a contradiction.
+		 * 'len' covers sa_family + leading NUL + name bytes. */
+		if (u && susfs_unix_is_hidden(sunname->sun_path + 1,
+					      len - offsetof(struct sockaddr_un, sun_path) - 1) &&
+		    !uid_eq(u->sk_uid, current_uid())) {
+			sock_put(u);
+			goto fail;
+		}
+#endif
 		if (u) {
 			struct dentry *dentry;
 			dentry = unix_sk(u)->path.dentry;
