@@ -2877,6 +2877,18 @@ static int unix_seq_show(struct seq_file *seq, void *v)
 		struct unix_sock *u = unix_sk(s);
 		unix_state_lock(s);
 
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+		/* susfs: drop lines of listed abstract sockets for umounted apps,
+		 * so the connect() refusal cannot be contradicted by /proc/net/unix.
+		 * Root and every other caller still see the full table. */
+		if (u->addr && UNIX_ABSTRACT(s) &&
+		    susfs_unix_is_hidden(u->addr->name->sun_path + 1,
+					 u->addr->len - offsetof(struct sockaddr_un, sun_path) - 1)) {
+			unix_state_unlock(s);
+			return 0;
+		}
+#endif
+
 		seq_printf(seq, "%pK: %08X %08X %08X %04X %02X %5lu",
 			s,
 			refcount_read(&s->sk_refcnt),
