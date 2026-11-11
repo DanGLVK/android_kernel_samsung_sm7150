@@ -85,8 +85,8 @@ struct nm_inode_info {
 struct nm_child_array {
     struct rcu_head rcu;
     int count;
-    u16 bucket_count;
-    u32 starts[] __aligned(4);   /* bucket_count + 1 u32 */
+    u16 bucket_slots;
+    u32 starts[] __aligned(4);
 };
 
 struct nm_dir_node {
@@ -153,23 +153,23 @@ struct nm_uid_array {
 
 static inline struct nm_leaf **nm_entries(struct nm_child_array *arr)
 {
-    uintptr_t p = (uintptr_t)arr->starts + (arr->bucket_count + 1) * sizeof(u32);
+    uintptr_t p = (uintptr_t)arr->starts + arr->bucket_slots * sizeof(u32);
     return (struct nm_leaf **)((p + 7) & ~(uintptr_t)7);
 }
 
-static inline u16 nm_child_buckets_for(int count)
+static inline u16 nm_child_slots_for(int count)
 {
     if (count <= 2)   return 0;
-    if (count <= 16)  return 8;
-    if (count <= 64)  return 32;
-    if (count <= 256) return 128;
-    if (count <= 1024) return 256;
-    return 512;
+    if (count <= 16)  return 9;
+    if (count <= 64)  return 33;
+    if (count <= 256) return 129;
+    if (count <= 1024) return 257;
+    return 513;
 }
 
 static inline u32 nm_child_bucket(struct nm_child_array *arr, u32 hash)
 {
-    return (hash >> 5) & (arr->bucket_count - 1);
+    return (hash >> 5) & (arr->bucket_slots - 2);
 }
 
 /*** Operaction Vectors ***/
@@ -196,7 +196,7 @@ static void nm_clear_state(int clear_flags);
 /* =====================================================================
  * NoMount VFS Offset Protocol
  * =====================================================================
- * 64-bit layout: [ 16-bit 'nm' ][ 16-bit 0 ][ 32-bit ID ] 
+ * 64-bit layout: [ 16-bit 'nm' ][ 16-bit FRAG ][ 32-bit ID ]
  * 32-bit layout: [ 16-bit 'nm' ][ 16-bit ID ]
  */
 #define NM_SIG_16 0x6E6DULL /* "nm" in hex */
@@ -204,7 +204,7 @@ static inline bool nm_is_virtual_pos(loff_t pos) {
 #ifdef CONFIG_COMPAT
     if (in_compat_syscall()) return (pos & 0xFFFF0000ULL) == (NM_SIG_16 << 16);
 #endif
-    return (pos & 0xFFFFFFFF00000000ULL) == (NM_SIG_16 << 48);
+    return (pos & 0xFFFF000000000000ULL) == (NM_SIG_16 << 48);
 }
 
 static inline loff_t nm_pack_pos(u32 id) {
@@ -212,6 +212,20 @@ static inline loff_t nm_pack_pos(u32 id) {
     if (in_compat_syscall()) return (NM_SIG_16 << 16) | (id & 0xFFFF);
 #endif
     return (NM_SIG_16 << 48) | id;
+}
+
+static inline loff_t nm_pack_pos_frag(u32 id, u32 frag) {
+#ifdef CONFIG_COMPAT
+    if (in_compat_syscall()) return (NM_SIG_16 << 16) | (id & 0xFFFF);
+#endif
+    return ((loff_t)NM_SIG_16 << 48) | ((loff_t)(frag & 0xFFFF) << 32) | id;
+}
+
+static inline u32 nm_unpack_frag(loff_t pos) {
+#ifdef CONFIG_COMPAT
+    if (in_compat_syscall()) return 0;
+#endif
+    return (u32)((pos >> 32) & 0xFFFF);
 }
 
 static inline u32 nm_unpack_pos(loff_t pos) {

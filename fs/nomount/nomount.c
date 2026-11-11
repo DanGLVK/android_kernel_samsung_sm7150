@@ -39,6 +39,11 @@ static __always_inline bool nm_child_matches(struct nm_leaf *leaf, const char *n
     return child_name[0] == name[0] && child_name[len - 1] == name[len - 1] && !memcmp(child_name, name, len);
 }
 
+static __always_inline u32 nm_child_frag(struct nm_leaf *leaf)
+{
+    return (leaf->child_hash >> 16) & 0xFFFF;
+}
+
 static bool nm_rules_overlap(const struct nm_rule *a, const struct nm_rule *b)
 {
     unsigned int lo = max(a->target_uid, b->target_uid), hi = min(a->uid_end, b->uid_end);
@@ -78,7 +83,7 @@ static struct nm_leaf *nm_find_leaf_in_dir(struct nm_dir_node *dir_node, const c
     if (!dir_node || !(children = rcu_dereference_check(dir_node->children, lockdep_is_held(&nm_mutex))))
         return NULL;
     entries = nm_entries(children);
-    if (!children->bucket_count) {
+    if (!children->bucket_slots) {
         for (i = 0; i < children->count; i++)
             if (nm_child_matches(entries[i], name, len))
                 return entries[i];
@@ -227,20 +232,37 @@ static NM_ACTOR_RET nm_actor_proxy(struct dir_context *ctx, const char *name, in
 static inline void nm_emit_virtual_children(struct dir_context *ctx, struct nm_dir_node *dir_node, uid_t fsuid, bool native_view)
 {
 	if (!dir_node) return;
-	if (!nm_is_virtual_pos(ctx->pos)) ctx->pos = nm_pack_pos(0);
 
-	for (u32 id = nm_unpack_pos(ctx->pos); ; id++) {
+	u32 index = 0;
+	if (nm_is_virtual_pos(ctx->pos)) {
+		index = nm_unpack_pos(ctx->pos);
+		u32 frag = nm_unpack_frag(ctx->pos);
+		if (frag) {
+			rcu_guard();
+			struct nm_child_array *array = rcu_dereference(dir_node->children);
+			if (array) {
+				if (index >= (u32)array->count || nm_child_frag(nm_entries(array)[index]) != frag) {
+					for (u32 i = 0; i < (u32)array->count; i++)
+						if (nm_child_frag(nm_entries(array)[i]) == frag) { index = i; break; }
+				}
+			}
+		}
+	}
+
+	for (u32 id = index; ; id++) {
 		char name_buf[NAME_MAX + 1];
 		int name_len = 0;
 		unsigned long v_ino = 0;
 		unsigned char d_type = 0;
 		bool do_emit = false, has_more = false;
+		u32 cur_frag = 0, next_frag = 0;
 
 		rcu_read_lock();
 		struct nm_child_array *array = rcu_dereference(dir_node->children);
 		if (array && id < (u32)array->count) {
 			struct nm_leaf *leaf = nm_entries(array)[id];
 			struct nm_rule *rule = nm_select_rule(leaf, fsuid);
+			cur_frag = nm_child_frag(leaf);
 			has_more = true;
 			if (rule && !(rule->flags & NM_FLAG_WHITEOUT) && (!native_view || nm_rule_needs_readdir(leaf, rule))) {
 				name_len = leaf->child_len;
@@ -251,13 +273,14 @@ static inline void nm_emit_virtual_children(struct dir_context *ctx, struct nm_d
 					do_emit = true;
 				}
 			}
+			if (id + 1 < (u32)array->count) next_frag = nm_child_frag(nm_entries(array)[id + 1]);
 		}
 		rcu_read_unlock();
 		if (!has_more) break;
 
-		ctx->pos = nm_pack_pos(id);
+		ctx->pos = nm_pack_pos_frag(id, cur_frag);
 		if (do_emit && !dir_emit(ctx, name_buf, name_len, v_ino, d_type)) break;
-		ctx->pos = nm_pack_pos(id + 1);
+		ctx->pos = nm_pack_pos_frag(id + 1, next_frag);
 	}
 }
 
@@ -433,7 +456,7 @@ static int nm_iterate_view(struct file *file, struct dir_context *ctx, const str
 
     if (unlikely(nm_is_virtual_pos(ctx->pos)))
         goto emit_virtual;
-    if (opaque || !real_file) {
+    if ((opaque && !uid_blocked) || !real_file) {
         if (ctx->pos < 2 && !dir_emit_dots(file, ctx)) return 0;
         ctx->pos = nm_pack_pos(0);
         goto emit_virtual;
@@ -501,7 +524,7 @@ static int nm_hijacked_unlink(struct inode *dir, struct dentry *dentry)
         goto do_real_unlink;
     }
     leaf = nm_find_leaf_in_dir(dir_node, dentry->d_name.name, dentry->d_name.len);
-    if (unlikely(!leaf || !(rule = nm_select_rule(leaf, fsuid)))) {
+    if (unlikely(!leaf || !(rule = nm_select_rule(leaf, fsuid)) || (!rule->target_uid && !rule->uid_end))) {
         mutex_unlock(&nm_mutex);
         goto do_real_unlink;
     }
@@ -866,8 +889,9 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
             .v_ino = d_inode(backing)->i_ino,
             .backing_child = true,
         };
-        path_get(&rule_info.r_path);
         rule_info.r_path.dentry = backing;
+        path_get(&rule_info.r_path);
+        dput(backing);
         return nm_materialize_rule(dir, dentry, &rule_info);
     }
 
@@ -1118,19 +1142,17 @@ static int nm_hijack_superblock(struct super_block *sb, bool with_xattr)
         if (!(nm_sop = kzalloc(sizeof(*nm_sop), GFP_KERNEL))) return -ENOMEM;
         nm_sop->orig_sop = sb->s_op;
         nm_sop->sb = sb;
-        if (kernfs) {
-            list_add_tail_rcu(&nm_sop->list, &nm_sb_list);
-            return 0;
+        if (!kernfs) {
+            nm_sop->fake_sop = *sb->s_op;
+            if (with_xattr) {
+                nm_sop->fake_sop.drop_inode = nm_hijacked_drop_inode;
+                nm_sop->fake_sop.evict_inode = nm_hijacked_evict_inode;
+            }
+            if (!sb_rdonly(sb) && !nm_is_pseudo_fs(sb))
+                nm_sop->fake_sop.sync_fs = nm_shutdown_sync_fs;
+            smp_store_release(&sb->s_op, &nm_sop->fake_sop);
         }
-        nm_sop->fake_sop = *sb->s_op;
-        if (with_xattr) {
-            nm_sop->fake_sop.drop_inode = nm_hijacked_drop_inode;
-            nm_sop->fake_sop.evict_inode = nm_hijacked_evict_inode;
-        }
-        if (!sb_rdonly(sb) && !nm_is_pseudo_fs(sb))
-            nm_sop->fake_sop.sync_fs = nm_shutdown_sync_fs;
         list_add_tail_rcu(&nm_sop->list, &nm_sb_list);
-        smp_store_release(&sb->s_op, &nm_sop->fake_sop);
         nm_debug("Superblock successfully hijacked for dev: 0x%x\n", sb->s_dev);
     } else if (!with_xattr || nm_sop->fake_xattr) {
         return 0;
@@ -1271,17 +1293,27 @@ static void nm_clear_dops_sb(struct super_block *sb)
     list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
         spin_lock(&inode->i_lock);
         for_each_alias(dentry, inode) {
-            if (dentry->d_op && dentry->d_op->d_revalidate == nm_d_revalidate) {
-                spin_lock(&dentry->d_lock);
-                dentry->d_op = NULL;
-                dentry->d_flags &= ~(DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE |
-                                     DCACHE_OP_DELETE | DCACHE_OP_PRUNE |
-                                     DCACHE_OP_HASH | DCACHE_OP_COMPARE);
+            const struct dentry_operations *dop, *orig = NULL;
+            spin_lock(&dentry->d_lock);
+            dop = dentry->d_op;
+            if (dop && dop->d_revalidate == nm_d_revalidate) {
+                if (dop != &nm_dops)
+                    orig = nm_get_orig_dops(container_of(dop, struct nm_dir_ops, fake_dops));
+                if (orig) {
+                    dentry->d_op = orig;
+                    if (!orig->d_revalidate)
+                        dentry->d_flags &= ~DCACHE_OP_REVALIDATE;
+                } else {
+                    dentry->d_op = NULL;
+                    dentry->d_flags &= ~(DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE |
+                                         DCACHE_OP_DELETE | DCACHE_OP_PRUNE |
+                                         DCACHE_OP_HASH | DCACHE_OP_COMPARE | DCACHE_OP_REAL);
 #ifdef DCACHE_DONTCACHE
-                dentry->d_flags &= ~DCACHE_DONTCACHE;
+                    dentry->d_flags &= ~DCACHE_DONTCACHE;
 #endif
-                spin_unlock(&dentry->d_lock);
+                }
             }
+            spin_unlock(&dentry->d_lock);
         }
         spin_unlock(&inode->i_lock);
     }
@@ -1300,12 +1332,12 @@ static void nm_restore_superblocks(void)
             list_for_each_entry(inode, &nm_sop->sb->s_inodes, i_sb_list)
                 nm_destroy_hijacked_inode(inode);
             spin_unlock(&nm_sop->sb->s_inode_list_lock);
-            if (READ_ONCE(nm_sop->sb->s_op) == &nm_sop->fake_sop) {
+            if (READ_ONCE(nm_sop->sb->s_op) == &nm_sop->fake_sop)
                 smp_store_release(&nm_sop->sb->s_op, nm_sop->orig_sop);
-                if (nm_sop->fake_xattr) {
+            if (nm_sop->fake_xattr) {
+                if (READ_ONCE(nm_sop->sb->s_xattr) == nm_sop->fake_xattr)
                     smp_store_release((const struct xattr_handler ***)&nm_sop->sb->s_xattr, nm_sop->orig_xattr);
-                    kfree(nm_sop->fake_xattr); 
-                }
+                kfree(nm_sop->fake_xattr);
             }
             nm_debug("Successfully cured superblock for dev: 0x%x\n", nm_sop->sb->s_dev);
         }
@@ -1325,12 +1357,12 @@ static struct nm_dir_node *nm_alloc_dir_node(void)
 
 static struct nm_child_array *nm_alloc_child_array(int count)
 {
-    u16 buckets = nm_child_buckets_for(count);
-    size_t sz = ALIGN(sizeof(struct nm_child_array) + (buckets + 1) * sizeof(u32), 8) + count * sizeof(struct nm_leaf *);
+    u16 slots = nm_child_slots_for(count);
+    size_t sz = ALIGN(sizeof(struct nm_child_array) + slots * sizeof(u32), 8) + count * sizeof(struct nm_leaf *);
     struct nm_child_array *array = kmalloc(sz, GFP_KERNEL);
     if (array) {
         array->count = count;
-        array->bucket_count = buckets;
+        array->bucket_slots = slots;
     }
     return array;
 }
@@ -1341,7 +1373,7 @@ static void nm_rebuild_children(struct nm_child_array *array, struct nm_child_ar
     struct nm_leaf **entries = nm_entries(array);
     u16 b;
 
-    if (!array->bucket_count) {
+    if (!array->bucket_slots) {
         int at = 0;
         for (int i = 0; i < count; i++)
             if (i != skip) entries[at++] = nm_entries(old)[i];
@@ -1349,12 +1381,12 @@ static void nm_rebuild_children(struct nm_child_array *array, struct nm_child_ar
         return;
     }
 
-    memset(array->starts, 0, (array->bucket_count + 1) * sizeof(u32));
+    memset(array->starts, 0, array->bucket_slots * sizeof(u32));
     for (int i = 0; i < count; i++)
         if (i != skip) array->starts[nm_child_bucket(array, nm_entries(old)[i]->child_hash)]++;
     if (extra) array->starts[nm_child_bucket(array, extra->child_hash)]++;
 
-    for (b = 1; b <= array->bucket_count; b++)
+    for (b = 1; b < array->bucket_slots; b++)
         array->starts[b] += array->starts[b - 1];
 
     for (int i = count - 1; i >= 0; i--) {
@@ -1398,11 +1430,11 @@ static int nm_inject_child_locked(struct nm_dir_node *dir_node, struct nm_leaf *
     leaf->child_hash = full_name_hash((const void *)(unsigned long)NM_MAGIC_SIG, name, name_len);
 
     if (!(array = nm_alloc_child_array(count + 1))) return -ENOMEM;
-    if (old && old->bucket_count && array->bucket_count == old->bucket_count) {
+    if (old && old->bucket_slots && array->bucket_slots == old->bucket_slots) {
         u32 bucket = nm_child_bucket(array, leaf->child_hash), pos = old->starts[bucket + 1];
         u16 i;
         for (i = 0; i <= bucket; i++) array->starts[i] = old->starts[i];
-        for (; i <= array->bucket_count; i++) array->starts[i] = old->starts[i] + 1;
+        for (; i < array->bucket_slots; i++) array->starts[i] = old->starts[i] + 1;
         memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_leaf *));
         nm_entries(array)[pos] = leaf;
         memcpy(nm_entries(array) + pos + 1, nm_entries(old) + pos, (count - pos) * sizeof(struct nm_leaf *));
@@ -1426,7 +1458,7 @@ static struct nm_dir_node *nm_delete_child_locked(struct nm_leaf *leaf, bool cle
     if (!clear) {
         u32 bucket = 0;
         int pos = 0, end = old->count;
-        if (old->bucket_count) {
+        if (old->bucket_slots) {
             bucket = nm_child_bucket(old, leaf->child_hash);
             pos = old->starts[bucket];
             end = old->starts[bucket + 1];
@@ -1436,10 +1468,10 @@ static struct nm_dir_node *nm_delete_child_locked(struct nm_leaf *leaf, bool cle
         if (old->count > 1) {
             int new_count = old->count - 1;
             if (!(array = nm_alloc_child_array(new_count))) return ERR_PTR(-ENOMEM);
-            if (array->bucket_count && array->bucket_count == old->bucket_count) {
+            if (array->bucket_slots && array->bucket_slots == old->bucket_slots) {
                 u16 i;
                 for (i = 0; i <= bucket; i++) array->starts[i] = old->starts[i];
-                for (; i <= array->bucket_count; i++) array->starts[i] = old->starts[i] - 1;
+                for (; i < array->bucket_slots; i++) array->starts[i] = old->starts[i] - 1;
                 memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_leaf *));
                 memcpy(nm_entries(array) + pos, nm_entries(old) + pos + 1, (new_count - pos) * sizeof(struct nm_leaf *));
             } else nm_rebuild_children(array, old, NULL, pos);
