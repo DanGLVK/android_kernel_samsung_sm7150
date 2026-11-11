@@ -32,12 +32,19 @@
 #define CMD_SUSFS_SUS_SU 0x60000 /* deprecated */
 #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 0x60010
 #define CMD_SUSFS_ADD_SUS_MAP 0x60020
+#define CMD_SUSFS_ADD_SUS_UNIX 0x60030
+#define CMD_SUSFS_DEL_SUS_UNIX 0x60031
+#define CMD_SUSFS_SHOW_SUS_UNIX 0x60032
 
 #define SUSFS_MAX_LEN_PATHNAME 256 // 256 should address many paths already unless you are doing some strange experimental stuff, then set your own desired length
 #define SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE 8192 // 8192 is enough I guess
 #define SUSFS_ENABLED_FEATURES_SIZE 8192 // 8192 is enough I guess
 #define SUSFS_MAX_VERSION_BUFSIZE 16
 #define SUSFS_MAX_VARIANT_BUFSIZE 16
+
+/* sus_unix: an abstract name is sun_path minus its leading NUL, UNIX_PATH_MAX(108) - 1 */
+#define SUSFS_UNIX_NAME_MAX 107
+#define SUSFS_UNIX_LIST_SIZE 2048 // enough for 16 names of up to 107 bytes each
 
 #define TRY_UMOUNT_DEFAULT 0 /* used by susfs_try_umount() */
 #define TRY_UMOUNT_DETACH 1 /* used by susfs_try_umount() */

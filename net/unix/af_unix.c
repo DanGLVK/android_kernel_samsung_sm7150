@@ -109,6 +109,7 @@
 #include <net/af_unix.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/susfs.h>
 #include <net/scm.h>
 #include <linux/init.h>
 #include <linux/poll.h>
@@ -975,6 +976,16 @@ static struct sock *unix_find_other(struct net *net,
 		}
 	} else {
 		err = -ECONNREFUSED;
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+		/* susfs: a umounted app must not be able to prove a listed abstract
+		 * listener exists by connecting to it, so answer exactly what an
+		 * abstract name nobody bound answers. The name bytes are already
+		 * in kernel space here (move_addr_to_kernel ran in __sys_connect).
+		 * 'len' covers sa_family + leading NUL + name bytes. */
+		if (susfs_unix_is_hidden(sunname->sun_path + 1,
+					 len - offsetof(struct sockaddr_un, sun_path) - 1))
+			goto fail;
+#endif
 		u = unix_find_socket_byname(net, sunname, len, type, hash);
 		if (u) {
 			struct dentry *dentry;

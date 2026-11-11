@@ -2,6 +2,7 @@
 #include <linux/cred.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <linux/atomic.h>
 #include <linux/seq_file.h>
 #include <linux/printk.h>
 #include <linux/namei.h>
@@ -1231,6 +1232,178 @@ out_copy_to_user:
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 
+/* sus_unix */
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+#define SUSFS_UNIX_MAX 16
+
+struct susfs_unix_name {
+	int len;
+	char name[SUSFS_UNIX_NAME_MAX + 1];
+};
+
+static struct susfs_unix_name susfs_unix_names[SUSFS_UNIX_MAX];
+static int susfs_unix_count;
+static DEFINE_SPINLOCK(susfs_unix_lock);
+static atomic_t susfs_unix_n_checked = ATOMIC_INIT(0);
+static atomic_t susfs_unix_n_hidden = ATOMIC_INIT(0);
+
+static bool susfs_unix_name_is_listed_locked(const char *name, int name_len) {
+	bool listed = false;
+	int i;
+
+	for (i = 0; i < susfs_unix_count; i++) {
+		if (susfs_unix_names[i].len == name_len &&
+		    !memcmp(susfs_unix_names[i].name, name, name_len)) {
+			listed = true;
+			break;
+		}
+	}
+	return listed;
+}
+
+/* called by unix_find_other() and unix_seq_show() on kernel-space name bytes;
+ * 'name' points to the first byte after the leading NUL of an abstract name */
+bool susfs_unix_is_hidden(const char *name, int name_len) {
+	bool listed;
+
+	if (unlikely(!READ_ONCE(susfs_unix_count)))
+		return false;
+	if (!susfs_is_current_proc_umounted_app())
+		return false;
+	if (name_len <= 0 || name_len > SUSFS_UNIX_NAME_MAX)
+		return false;
+
+	atomic_inc(&susfs_unix_n_checked);
+	spin_lock(&susfs_unix_lock);
+	listed = susfs_unix_name_is_listed_locked(name, name_len);
+	spin_unlock(&susfs_unix_lock);
+	if (!listed)
+		return false;
+	atomic_inc(&susfs_unix_n_hidden);
+	return true;
+}
+
+void susfs_add_sus_unix(void __user **user_info) {
+	struct st_susfs_sus_unix info = {0};
+	int len;
+
+	if (copy_from_user(&info, (struct st_susfs_sus_unix __user*)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	len = strnlen(info.target_abstract_name, SUSFS_UNIX_NAME_MAX + 1);
+	if (len == 0 || len > SUSFS_UNIX_NAME_MAX) {
+		info.err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	spin_lock(&susfs_unix_lock);
+	if (susfs_unix_name_is_listed_locked(info.target_abstract_name, len)) {
+		// adding an already listed name is a no-op
+		info.err = 0;
+		goto out_unlock;
+	}
+	if (susfs_unix_count >= SUSFS_UNIX_MAX) {
+		info.err = -ENOSPC;
+		goto out_unlock;
+	}
+	susfs_unix_names[susfs_unix_count].len = len;
+	memcpy(susfs_unix_names[susfs_unix_count].name, info.target_abstract_name, len);
+	susfs_unix_names[susfs_unix_count].name[len] = '\0';
+	susfs_unix_count++;
+	info.err = 0;
+out_unlock:
+	spin_unlock(&susfs_unix_lock);
+	SUSFS_LOGI("sus_unix: added '@%.*s', err: %d\n", len, info.target_abstract_name, info.err);
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_sus_unix __user*)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_ADD_SUS_UNIX -> ret: %d\n", info.err);
+}
+
+void susfs_del_sus_unix(void __user **user_info) {
+	struct st_susfs_sus_unix info = {0};
+	int len;
+
+	if (copy_from_user(&info, (struct st_susfs_sus_unix __user*)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	len = strnlen(info.target_abstract_name, SUSFS_UNIX_NAME_MAX + 1);
+	if (len == 0 || len > SUSFS_UNIX_NAME_MAX) {
+		info.err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	info.err = -ENOENT;
+	spin_lock(&susfs_unix_lock);
+	if (susfs_unix_name_is_listed_locked(info.target_abstract_name, len)) {
+		int i;
+
+		for (i = 0; i < susfs_unix_count; i++) {
+			if (susfs_unix_names[i].len == len &&
+			    !memcmp(susfs_unix_names[i].name, info.target_abstract_name, len)) {
+				// swap with the last entry and shrink
+				susfs_unix_names[i] = susfs_unix_names[susfs_unix_count - 1];
+				WRITE_ONCE(susfs_unix_count, susfs_unix_count - 1);
+				info.err = 0;
+				break;
+			}
+		}
+	}
+	spin_unlock(&susfs_unix_lock);
+	SUSFS_LOGI("sus_unix: deleted '@%.*s', err: %d\n", len, info.target_abstract_name, info.err);
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_sus_unix __user*)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_DEL_SUS_UNIX -> ret: %d\n", info.err);
+}
+
+void susfs_show_sus_unix(void __user **user_info) {
+	struct st_susfs_sus_unix_list *info = (struct st_susfs_sus_unix_list *)kzalloc(sizeof(*info), GFP_KERNEL);
+	int i, written;
+
+	if (!info) {
+		int err = -ENOMEM;
+
+		if (copy_to_user(&((struct st_susfs_sus_unix_list __user*)*user_info)->err, &err, sizeof(err)))
+			SUSFS_LOGE("CMD_SUSFS_SHOW_SUS_UNIX -> ret: %d\n", -EFAULT);
+		return;
+	}
+
+	spin_lock(&susfs_unix_lock);
+	written = snprintf(info->names, sizeof(info->names), "# abstract names: %d/%d, checked=%d, hidden=%d\n",
+			   susfs_unix_count, SUSFS_UNIX_MAX,
+			   atomic_read(&susfs_unix_n_checked), atomic_read(&susfs_unix_n_hidden));
+	for (i = 0; i < susfs_unix_count; i++) {
+		if (written < 0 || written >= (int)sizeof(info->names)) {
+			written = -ENAMETOOLONG;
+			break;
+		}
+		written += snprintf(info->names + written, sizeof(info->names) - written,
+				    "@%s\n", susfs_unix_names[i].name);
+	}
+	spin_unlock(&susfs_unix_lock);
+	if (written < 0) {
+		info->err = written;
+	} else if (written >= (int)sizeof(info->names)) {
+		info->err = -ENAMETOOLONG;
+	} else {
+		info->err = 0;
+	}
+
+	if (copy_to_user((struct st_susfs_sus_unix_list __user*)*user_info, info, sizeof(*info))) {
+		info->err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_SHOW_SUS_UNIX -> ret: %d\n", info->err);
+	kfree(info);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+
 /* susfs avc log spoofing */
 extern bool susfs_is_avc_log_spoofing_enabled;
 
@@ -1333,6 +1506,11 @@ void susfs_get_enabled_features(void __user **user_info) {
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_MAP\n", buf_ptr, &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
+	if (info->err) goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_UNIX\n", buf_ptr, &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif

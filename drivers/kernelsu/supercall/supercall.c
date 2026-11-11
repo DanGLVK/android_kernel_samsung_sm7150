@@ -159,6 +159,20 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user 
 			return 0;
 		}
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+		if (cmd == CMD_SUSFS_ADD_SUS_UNIX) {
+			susfs_add_sus_unix(arg);
+			return 0;
+		}
+		if (cmd == CMD_SUSFS_DEL_SUS_UNIX) {
+			susfs_del_sus_unix(arg);
+			return 0;
+		}
+		if (cmd == CMD_SUSFS_SHOW_SUS_UNIX) {
+			susfs_show_sus_unix(arg);
+			return 0;
+		}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_UNIX
 		if (cmd == CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING) {
 			susfs_set_avc_log_spoofing(arg);
 			return 0;

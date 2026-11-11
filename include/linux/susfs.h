@@ -174,6 +174,19 @@ struct st_susfs_sus_map {
 };
 #endif
 
+/* sus_unix */
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+struct st_susfs_sus_unix {
+	char                                    target_abstract_name[SUSFS_UNIX_NAME_MAX + 1];
+	int                                     err;
+};
+
+struct st_susfs_sus_unix_list {
+	char                                    names[SUSFS_UNIX_LIST_SIZE];
+	int                                     err;
+};
+#endif
+
 /* avc log spoofing */
 struct st_susfs_avc_log_spoofing {
 	bool                                    enabled;
@@ -254,6 +267,14 @@ void susfs_add_open_redirect(void __user **user_info);
 /* sus_map */
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 void susfs_add_sus_map(void __user **user_info);
+#endif
+
+/* sus_unix */
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+void susfs_add_sus_unix(void __user **user_info);
+void susfs_del_sus_unix(void __user **user_info);
+void susfs_show_sus_unix(void __user **user_info);
+bool susfs_unix_is_hidden(const char *name, int name_len);
 #endif
 
 void susfs_set_avc_log_spoofing(void __user **user_info);
