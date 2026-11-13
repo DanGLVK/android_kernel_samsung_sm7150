@@ -1376,7 +1376,7 @@ static struct nm_child_array *nm_alloc_child_array(int count)
     return array;
 }
 
-static void nm_rebuild_children(struct nm_child_array *array, struct nm_child_array *old, struct nm_leaf *extra, int skip)
+static void nm_rebuild_children(struct nm_child_array *array, struct nm_child_array *old, struct nm_child extra, int skip)
 {
     int count = old ? old->count : 0;
     struct nm_child *entries = nm_entries(array);
@@ -1386,14 +1386,14 @@ static void nm_rebuild_children(struct nm_child_array *array, struct nm_child_ar
         int at = 0;
         for (int i = 0; i < count; i++)
             if (i != skip) entries[at++] = nm_entries(old)[i];
-        if (extra) entries[at] = (struct nm_child){ .leaf = extra, .hash = extra->child_hash };
+        if (extra.leaf) entries[at] = extra;
         return;
     }
 
     memset(array->starts, 0, array->bucket_slots * sizeof(u32));
     for (int i = 0; i < count; i++)
         if (i != skip) array->starts[nm_child_bucket(array, nm_entries(old)[i].hash)]++;
-    if (extra) array->starts[nm_child_bucket(array, extra->child_hash)]++;
+    if (extra.leaf) array->starts[nm_child_bucket(array, extra.hash)]++;
 
     for (b = 1; b < array->bucket_slots; b++)
         array->starts[b] += array->starts[b - 1];
@@ -1403,8 +1403,8 @@ static void nm_rebuild_children(struct nm_child_array *array, struct nm_child_ar
         struct nm_child *child = &nm_entries(old)[i];
         entries[--array->starts[nm_child_bucket(array, child->hash)]] = *child;
     }
-    if (extra)
-        entries[--array->starts[nm_child_bucket(array, extra->child_hash)]] = (struct nm_child){ .leaf = extra, .hash = extra->child_hash };
+    if (extra.leaf)
+        entries[--array->starts[nm_child_bucket(array, extra.hash)]] = extra;
 }
 
 static bool nm_rules_need_readdir(struct nm_leaf *leaf, struct nm_rule_array *rules)
@@ -1436,18 +1436,19 @@ static int nm_inject_child_locked(struct nm_dir_node *dir_node, struct nm_leaf *
 
     if (nm_find_leaf_in_dir(dir_node, name, name_len)) return -EEXIST;
     leaf->child_len = name_len;
-    leaf->child_hash = full_name_hash((const void *)(unsigned long)NM_MAGIC_SIG, name, name_len);
+    struct nm_child child = { .leaf = leaf, .hash = full_name_hash((const void *)(unsigned long)NM_MAGIC_SIG, name, name_len) };
+    leaf->child_hash = (u16)child.hash;
 
     if (!(array = nm_alloc_child_array(count + 1))) return -ENOMEM;
     if (old && old->bucket_slots && array->bucket_slots == old->bucket_slots) {
-        u32 bucket = nm_child_bucket(array, leaf->child_hash), pos = old->starts[bucket + 1];
+        u32 bucket = nm_child_bucket(array, child.hash), pos = old->starts[bucket + 1];
         u16 i;
         for (i = 0; i <= bucket; i++) array->starts[i] = old->starts[i];
         for (; i < array->bucket_slots; i++) array->starts[i] = old->starts[i] + 1;
         memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_child));
-        nm_entries(array)[pos] = (struct nm_child){ .leaf = leaf, .hash = leaf->child_hash };
+        nm_entries(array)[pos] = child;
         memcpy(nm_entries(array) + pos + 1, nm_entries(old) + pos, (count - pos) * sizeof(struct nm_child));
-    } else nm_rebuild_children(array, old, leaf, -1);
+    } else nm_rebuild_children(array, old, child, -1);
 
     leaf->parent_dir = dir_node;
     atomic_inc(&dir_node->refs);
@@ -1483,7 +1484,7 @@ static struct nm_dir_node *nm_delete_child_locked(struct nm_leaf *leaf, bool cle
                 for (; i < array->bucket_slots; i++) array->starts[i] = old->starts[i] - 1;
                 memcpy(nm_entries(array), nm_entries(old), pos * sizeof(struct nm_child));
                 memcpy(nm_entries(array) + pos, nm_entries(old) + pos + 1, (new_count - pos) * sizeof(struct nm_child));
-            } else nm_rebuild_children(array, old, NULL, pos);
+            } else nm_rebuild_children(array, old, (struct nm_child){0}, pos);
         }
     }
     nm_publish_child_view_locked(dir_node, array);
@@ -1791,7 +1792,7 @@ static int nm_generate_virtual_topology(struct nm_leaf *target, unsigned int uid
 
     hlist_for_each_entry_safe(parent, h_tmp, &pending, ht_node) {
         hlist_del(&parent->ht_node);
-        if (!err) hash_add_rcu(nm_leaves_ht, &parent->ht_node, parent->v_hash);
+        if (!err) hash_add(nm_leaves_ht, &parent->ht_node, parent->v_hash);
         else {
             nm_delete_child_locked(parent, false);
             nm_retire_leaf_locked(parent);
@@ -1804,7 +1805,7 @@ static struct nm_dir_node *nm_detach_leaf_locked(struct nm_leaf *leaf)
 {
     struct nm_dir_node *parent = nm_delete_child_locked(leaf, false);
     if (IS_ERR(parent)) return parent;
-    hash_del_rcu(&leaf->ht_node);
+    hash_del(&leaf->ht_node);
     nm_retire_leaf_locked(leaf);
     return parent;
 }
@@ -1892,7 +1893,7 @@ static int nm_add_rule_locked(const char *v_path, const char *r_path, u16 v_len,
     }
 
     for (int i = 0; i < pos; i++, j++) nm_copy_rule(&array->rules[j], &old->rules[i]);
-    nm_copy_rule(&array->rules[j++], &new_rule);
+    array->rules[j++] = new_rule;
     for (int i = pos + replace; i < count; i++, j++) nm_copy_rule(&array->rules[j], &old->rules[i]);
     array->uid_count = new_count - (!array->rules[0].target_uid && !array->rules[0].uid_end);
 
@@ -1905,14 +1906,14 @@ static int nm_add_rule_locked(const char *v_path, const char *r_path, u16 v_len,
         if ((err = nm_generate_virtual_topology(leaf, uid))) {
             nm_delete_child_locked(leaf, false);
             nm_retire_leaf_locked(leaf);
-            goto out_rule;
+            return err;
         }
-        hash_add_rcu(nm_leaves_ht, &leaf->ht_node, leaf->v_hash);
+        hash_add(nm_leaves_ht, &leaf->ht_node, leaf->v_hash);
     } else {
         nm_publish_rules_locked(leaf, array, old);
     }
 
-    goto out_rule;
+    return 0;
 
 out_dir:  nm_dir_put(new_dir);
 out_leaf: if (fresh) nm_free_leaf(leaf, false);
@@ -1984,7 +1985,7 @@ static void nm_clear_state(int clear_flags)
         int bkt;
         hash_for_each_safe(nm_leaves_ht, bkt, tmp, leaf, ht_node) {
             nm_delete_child_locked(leaf, true);
-            hash_del_rcu(&leaf->ht_node);
+            hash_del(&leaf->ht_node);
             nm_retire_leaf_locked(leaf);
         }
     }

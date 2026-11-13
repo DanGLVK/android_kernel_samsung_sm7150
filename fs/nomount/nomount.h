@@ -128,10 +128,9 @@ struct nm_leaf {
     u16 v_len;
     u16 child_len;
     bool native_file;
-    u32 child_hash;
-    union { struct hlist_node ht_node; struct rcu_head rcu; };
-    struct nm_leaf *next;
+    u16 child_hash;
     atomic_t refs;
+    union { struct hlist_node ht_node; struct nm_leaf *next; struct rcu_head rcu; };
     char paths[];
 };
 
