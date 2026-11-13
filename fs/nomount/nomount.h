@@ -49,7 +49,6 @@ static struct nm_leaf *nm_retired_leaves;
 
 /* * Helpers to dynamically calculate the memory address of the strings / structs */
 #define nm_get_child_name(leaf) ((leaf)->paths + (leaf)->v_len - (leaf)->child_len)
-#define nm_rule_heap(arr) ((char *)(arr)->rules + (arr)->count * sizeof(struct nm_rule))
 
 struct nm_dir_ops {
     const struct inode_operations *orig_iop;
@@ -75,11 +74,16 @@ struct nm_sop {
 
 struct nm_inode_info {
     struct path r_path;
-    struct nm_dir_node *dir_node;
+    union { struct nm_dir_node *dir_node; struct nm_leaf *leaf; const void *node; };
     struct file *r_file;
     bool opaque;
     bool backing_child;
     struct rcu_head rcu;
+};
+
+struct nm_child {
+    struct nm_leaf *leaf;
+    u32 hash;
 };
 
 struct nm_child_array {
@@ -100,13 +104,10 @@ struct nm_dir_node {
 
 struct nm_rule {
     struct path r_path;
-    struct dentry *r_parent;
-    const char *r_name;
     unsigned int target_uid;
     unsigned int uid_end;
     unsigned int deny_start;
     unsigned int deny_end;
-    u16 r_name_len;
     u16 flags;
 };
 
@@ -128,8 +129,9 @@ struct nm_leaf {
     u16 child_len;
     bool native_file;
     u32 child_hash;
-    struct hlist_node ht_node;
+    union { struct hlist_node ht_node; struct rcu_head rcu; };
     struct nm_leaf *next;
+    atomic_t refs;
     char paths[];
 };
 
@@ -137,11 +139,10 @@ struct nm_rule_info {
     u16 flags;
     bool backing_child;
     unsigned long v_ino;
+    unsigned long key;
     struct path r_path;
     struct nm_dir_node *this_dir;
-    struct dentry *saved_parent;
-    char *r_name;
-    u16 r_name_len;
+    struct nm_leaf *leaf;
 };
 
 struct nm_uid_array {
@@ -151,10 +152,10 @@ struct nm_uid_array {
     uid_t uids[];
 };
 
-static inline struct nm_leaf **nm_entries(struct nm_child_array *arr)
+static inline struct nm_child *nm_entries(struct nm_child_array *arr)
 {
     uintptr_t p = (uintptr_t)arr->starts + arr->bucket_slots * sizeof(u32);
-    return (struct nm_leaf **)((p + 7) & ~(uintptr_t)7);
+    return (struct nm_child *)((p + 7) & ~(uintptr_t)7);
 }
 
 static inline u16 nm_child_slots_for(int count)
@@ -188,6 +189,7 @@ static int nm_hijacked_iterate_dir(struct file *file, struct dir_context *ctx);
 static void nm_hijacked_evict_inode(struct inode *inode);
 static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool injected);
 static void nm_dir_put(struct nm_dir_node *dir_node);
+static void nm_leaf_put(struct nm_leaf *leaf);
 static void nm_shutdown_release(void);
 static int nm_shutdown_sync_fs(struct super_block *sb, int wait);
 static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid, unsigned int uid_end, unsigned int deny_start, unsigned int deny_end);
