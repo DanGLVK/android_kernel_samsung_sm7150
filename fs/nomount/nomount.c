@@ -62,15 +62,17 @@ static struct nm_rule *nm_select_rule(struct nm_leaf *leaf, unsigned int uid)
     struct nm_rule *fallback = NULL;
     if (!arr) return NULL;
     if (!arr->uid_count) return arr->rules;
+
     struct nm_rule *r = arr->rules, *end = r + arr->count;
     if (arr->uid_count != arr->count) fallback = r++;
-    do {
+    while (r < end) {
         if (r->target_uid > uid) break;
         if (uid <= r->uid_end) {
-            if (r->deny_start && uid >= r->deny_start && uid <= r->deny_end) continue;
+            if (r->deny_start && uid >= r->deny_start && uid <= r->deny_end) { r++; continue; }
             return r;
         }
-    } while (++r < end);
+        r++;
+    }
     return fallback;
 }
 
@@ -1675,9 +1677,9 @@ static void nm_retire_leaf_locked(struct nm_leaf *leaf)
     else schedule_work(&nm_reclaim_work);
 }
 
-static void nm_prepare_native_file(struct nm_leaf *leaf, struct nm_dir_node *dir_node, struct dentry *parent)
+static void nm_prepare_native_file(struct nm_leaf *leaf, struct nm_dir_node *dir_node, const struct path *parent, const char *name)
 {
-    switch (parent->d_sb->s_magic) {
+    switch (parent->dentry->d_sb->s_magic) {
 #if defined(EROFS_SUPER_MAGIC_V1) && BITS_PER_LONG == 64
     case EROFS_SUPER_MAGIC_V1:
 #endif
@@ -1691,9 +1693,9 @@ static void nm_prepare_native_file(struct nm_leaf *leaf, struct nm_dir_node *dir
     struct path path;
 
     if (dir_node->owner || rule->flags || !S_ISREG(d_backing_inode(rule->r_path.dentry)->i_mode)) return;
-    if (kern_path(leaf->paths, 0, &path)) return;
+    if (vfs_path_lookup(parent->dentry, parent->mnt, name, 0, &path)) return;
     struct inode *inode = d_backing_inode(path.dentry);
-    if (path.dentry->d_parent == parent && S_ISREG(inode->i_mode) && inode->i_nlink == 1) {
+    if (path.dentry->d_parent == parent->dentry && S_ISREG(inode->i_mode) && inode->i_nlink == 1) {
         leaf->v_ino = inode->i_ino;
         leaf->native_file = true;
     }
@@ -1750,7 +1752,7 @@ static int nm_generate_virtual_topology(struct nm_leaf *target, unsigned int uid
                 if (!dir) err = -ENOMEM;
             }
             if (!err && !virtual) {
-                nm_prepare_native_file(child, dir, path.dentry);
+                nm_prepare_native_file(child, dir, &path, name);
                 err = nm_hijack_dir_ops(dir, inode);
             }
             if (!err && !(err = nm_inject_child_locked(dir, child, name, name_len))) {
