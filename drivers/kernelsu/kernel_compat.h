@@ -35,7 +35,7 @@
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
-static noinline void ksu_do_nothing(void *unused) { };
+static void ksu_do_nothing(void *unused) { };
 __weak void kick_all_cpus_sync(void)
 {
 	smp_mb();
@@ -113,8 +113,34 @@ __weak long copy_to_kernel_nofault(void *dst, const void *src, size_t size)
 }
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0) // strncpy_from_unsafe_user
+__weak long strncpy_from_user_nofault(char *dst, const void __user *unsafe_addr, long count)
+{
+	mm_segment_t old_fs = get_fs();
+	long ret;
+
+	if (unlikely(count <= 0))
+		return 0;
+
+	set_fs(USER_DS);
+	pagefault_disable();
+	ret = strncpy_from_user(dst, unsafe_addr, count);
+	pagefault_enable();
+	set_fs(old_fs);
+
+	if (ret >= count) {
+		ret = count;
+		dst[ret - 1] = '\0';
+	} else if (ret > 0) {
+		ret++;
+	}
+
+	return ret;
+}
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0) // probe_user_read
-static long ksu_copy_from_user_nofault(void *dst, const void __user *src, size_t size)
+static __always_inline long ksu_copy_from_user_nofault(void *dst, const void __user *src, size_t size)
 {
 	// https://elixir.bootlin.com/linux/v5.8/source/mm/maccess.c#L205
 	mm_segment_t old_fs = get_fs();
@@ -174,8 +200,16 @@ static __always_inline long memmove_user(void __user *dst, const void __user *sr
 #define ksu_is_seccomp_enabled() (!!current->seccomp.mode)
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+#if defined(CONFIG_AUDIT)
+#define audit_context() (current->audit_context)
+#else
+#define audit_context() (nullptr)
+#endif
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
-static noinline ssize_t ksu_kernel_read_compat(struct file *file, void *buf, size_t count, loff_t *pos)
+static ssize_t ksu_kernel_read_compat(struct file *file, void *buf, size_t count, loff_t *pos)
 {
 	mm_segment_t old_fs = get_fs();
 	set_fs(get_ds());
@@ -185,7 +219,7 @@ static noinline ssize_t ksu_kernel_read_compat(struct file *file, void *buf, siz
 }
 #define kernel_read ksu_kernel_read_compat
 
-static noinline ssize_t ksu_kernel_write_compat(struct file *file, const void *buf, size_t count, loff_t *pos)
+static ssize_t ksu_kernel_write_compat(struct file *file, const void *buf, size_t count, loff_t *pos)
 {
 	mm_segment_t old_fs = get_fs();
 	set_fs(get_ds());
@@ -448,6 +482,14 @@ __weak void groups_sort(struct group_info *group_info) { } // no-op
 
 #ifndef U16_MAX
 #define	U16_MAX	((u16)(~0U))
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION (4, 16, 0)
+#define __poll_t unsigned __bitwise
+#endif // more portable than typedef
+
+#ifndef in_compat_syscall
+#define in_compat_syscall() is_compat_task()
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION (4, 12, 0) && !defined(EPOLLIN)
