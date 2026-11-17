@@ -1100,6 +1100,19 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		u->path = path;
 		list = &unix_socket_table[hash];
 	} else {
+#ifdef CONFIG_KSU_SUSFS_SUS_UNIX
+		/* susfs: a listed name is hidden from umounted apps, so bind()
+		 * must not reveal whether a listener exists - an unbound name
+		 * would otherwise bind successfully and turn bind() into an
+		 * existence oracle. Answer what an existing listener answers.
+		 * The name stays reserved for the service it is hiding. */
+		if (susfs_unix_is_hidden(sun_path + 1,
+					 addr_len - offsetof(struct sockaddr_un, sun_path) - 1)) {
+			err = -EADDRINUSE;
+			unix_release_addr(addr);
+			goto out_up;
+		}
+#endif
 		spin_lock(&unix_table_lock);
 		err = -EADDRINUSE;
 		if (__unix_find_socket_byname(net, sunaddr, addr_len,
