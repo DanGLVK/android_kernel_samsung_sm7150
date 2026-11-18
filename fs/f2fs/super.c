@@ -108,6 +108,8 @@ enum {
 	Opt_noinline_dentry,
 	Opt_flush_merge,
 	Opt_noflush_merge,
+	Opt_checkpoint_merge,
+	Opt_nocheckpoint_merge,
 	Opt_nobarrier,
 	Opt_fastboot,
 	Opt_extent_cache,
@@ -174,6 +176,8 @@ static match_table_t f2fs_tokens = {
 	{Opt_noinline_dentry, "noinline_dentry"},
 	{Opt_flush_merge, "flush_merge"},
 	{Opt_noflush_merge, "noflush_merge"},
+	{Opt_checkpoint_merge, "checkpoint_merge"},
+	{Opt_nocheckpoint_merge, "nocheckpoint_merge"},
 	{Opt_nobarrier, "nobarrier"},
 	{Opt_fastboot, "fastboot"},
 	{Opt_extent_cache, "extent_cache"},
@@ -213,6 +217,7 @@ static match_table_t f2fs_tokens = {
 	{Opt_checkpoint_disable_cap, "checkpoint=disable:%u"},
 	{Opt_checkpoint_disable_cap_perc, "checkpoint=disable:%u%%"},
 	{Opt_checkpoint_enable, "checkpoint=enable"},
+	{Opt_checkpoint_merge, "checkpoint=merge"},
 	{Opt_compress_algorithm, "compress_algorithm=%s"},
 	{Opt_compress_log_size, "compress_log_size=%u"},
 	{Opt_compress_extension, "compress_extension=%s"},
@@ -601,6 +606,12 @@ static int parse_options(struct super_block *sb, char *options, bool is_remount)
 			break;
 		case Opt_noflush_merge:
 			clear_opt(sbi, FLUSH_MERGE);
+			break;
+		case Opt_checkpoint_merge:
+			set_opt(sbi, MERGE_CHECKPOINT);
+			break;
+		case Opt_nocheckpoint_merge:
+			clear_opt(sbi, MERGE_CHECKPOINT);
 			break;
 		case Opt_nobarrier:
 			set_opt(sbi, NOBARRIER);
@@ -1217,6 +1228,8 @@ static void f2fs_put_super(struct super_block *sb)
 	int i;
 	bool dropped;
 
+	f2fs_stop_ckpt_thread(sbi);
+
 	/* unregister procfs/sysfs entries in advance to avoid race case */
 	f2fs_unregister_sysfs(sbi);
 
@@ -1322,15 +1335,8 @@ int f2fs_sync_fs(struct super_block *sb, int sync)
 	if (unlikely(is_sbi_flag_set(sbi, SBI_POR_DOING)))
 		return -EAGAIN;
 
-	if (sync) {
-		struct cp_control cpc;
-
-		cpc.reason = __get_cp_reason(sbi);
-
-		down_write(&sbi->gc_lock);
-		err = f2fs_write_checkpoint(sbi, &cpc);
-		up_write(&sbi->gc_lock);
-	}
+	if (sync)
+		err = f2fs_issue_checkpoint(sbi);
 	f2fs_trace_ios(NULL, 1);
 
 	return err;
@@ -1348,6 +1354,8 @@ static int f2fs_freeze(struct super_block *sb)
 	/* must be clean, since sync_filesystem() was already called */
 	if (is_sbi_flag_set(F2FS_SB(sb), SBI_IS_DIRTY))
 		return -EINVAL;
+
+	f2fs_flush_ckpt_thread(F2FS_SB(sb));
 	return 0;
 }
 
@@ -1579,6 +1587,10 @@ static int f2fs_show_options(struct seq_file *seq, struct dentry *root)
 		seq_puts(seq, ",noinline_dentry");
 	if (!f2fs_readonly(sbi->sb) && test_opt(sbi, FLUSH_MERGE))
 		seq_puts(seq, ",flush_merge");
+	if (test_opt(sbi, MERGE_CHECKPOINT))
+		seq_puts(seq, ",checkpoint_merge");
+	else
+		seq_puts(seq, ",nocheckpoint_merge");
 	if (test_opt(sbi, NOBARRIER))
 		seq_puts(seq, ",nobarrier");
 	if (test_opt(sbi, FASTBOOT))
@@ -1683,6 +1695,7 @@ static void default_options(struct f2fs_sb_info *sbi)
 	clear_opt(sbi, DISABLE_CHECKPOINT);
 	F2FS_OPTION(sbi).unusable_cap = 0;
 	set_opt(sbi, FLUSH_MERGE);
+	set_opt(sbi, MERGE_CHECKPOINT);
 	set_opt(sbi, DISCARD);
 	if (f2fs_sb_has_blkzoned(sbi))
 		F2FS_OPTION(sbi).fs_mode = FS_MODE_LFS;
@@ -1934,6 +1947,15 @@ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
 		f2fs_destroy_flush_cmd_control(sbi, false);
 	} else {
 		err = f2fs_create_flush_cmd_control(sbi);
+		if (err)
+			goto restore_gc;
+	}
+
+	if ((*flags & MS_RDONLY) || !test_opt(sbi, MERGE_CHECKPOINT)) {
+		clear_opt(sbi, MERGE_CHECKPOINT);
+		f2fs_stop_ckpt_thread(sbi);
+	} else {
+		err = f2fs_start_ckpt_thread(sbi);
 		if (err)
 			goto restore_gc;
 	}
@@ -3698,6 +3720,8 @@ try_onemore:
 
 	f2fs_init_ino_entry_info(sbi);
 
+	f2fs_init_ckpt_req_control(sbi);
+
 	f2fs_init_fsync_node_info(sbi);
 
 	/* setup f2fs internal modules */
@@ -3860,6 +3884,10 @@ reset_checkpoint:
 
 	f2fs_tuning_parameters(sbi);
 
+	err = f2fs_start_ckpt_thread(sbi);
+	if (err)
+		goto sync_free_meta;
+
 	f2fs_notice(sbi, "Mounted with checkpoint version = %llx",
 		    cur_cp_version(F2FS_CKPT(sbi)));
 	f2fs_update_time(sbi, CP_TIME);
@@ -3868,6 +3896,8 @@ reset_checkpoint:
 	return 0;
 
 sync_free_meta:
+	f2fs_stop_ckpt_thread(sbi);
+
 	/* safe to flush all the data */
 	sync_filesystem(sbi->sb);
 	retry_cnt = 0;

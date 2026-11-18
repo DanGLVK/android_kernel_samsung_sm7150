@@ -24,6 +24,7 @@
 #include <linux/quotaops.h>
 #include <crypto/hash.h>
 #include <linux/overflow.h>
+#include <linux/ioprio.h>
 
 #include <linux/fscrypt.h>
 #include <linux/fsverity.h>
@@ -98,6 +99,9 @@ extern const char *f2fs_fault_name[FAULT_MAX];
 #define F2FS_MOUNT_RESERVE_ROOT		0x01000000
 #define F2FS_MOUNT_DISABLE_CHECKPOINT	0x02000000
 #define F2FS_MOUNT_NORECOVERY		0x04000000
+#define F2FS_MOUNT_MERGE_CHECKPOINT	0x08000000
+
+#define DEFAULT_CHECKPOINT_IOPRIO	(IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 3))
 
 #define F2FS_OPTION(sbi)	((sbi)->mount_opt)
 #define clear_opt(sbi, option)	(F2FS_OPTION(sbi).opt &= ~F2FS_MOUNT_##option)
@@ -1012,6 +1016,24 @@ struct flush_cmd_control {
 	struct llist_node *dispatch_list;	/* list for command dispatch */
 };
 
+struct ckpt_req {
+	struct completion wait;
+	struct llist_node llnode;
+	int ret;
+	int type;
+	ktime_t queue_time;
+};
+
+struct ckpt_req_control {
+	struct task_struct *f2fs_issue_ckpt;	/* checkpoint thread */
+	wait_queue_head_t ckpt_wait_queue;	/* waiting queue for wake-up */
+	atomic_t issued_ckpt;			/* # of issued checkpoints */
+	atomic_t total_ckpt;			/* # of total checkpoints */
+	atomic_t queued_ckpt;			/* # of queued checkpoints */
+	struct llist_head issue_list;		/* list for command issue */
+	int ckpt_thread_ioprio;			/* checkpoint thread ioprio */
+};
+
 struct f2fs_sm_info {
 	struct sit_info *sit_info;		/* whole segment information */
 	struct free_segmap_info *free_info;	/* free segment information */
@@ -1436,6 +1458,8 @@ struct f2fs_sb_info {
 	wait_queue_head_t cp_wait;
 	unsigned long last_time[MAX_TIME];	/* to store time in jiffies */
 	long interval_time[MAX_TIME];		/* to store thresholds */
+
+	struct ckpt_req_control cprc_info;	/* for checkpoint merge control */
 
 	struct inode_management im[MAX_INO_ENTRY];      /* manage inode cache */
 
@@ -3421,6 +3445,11 @@ int f2fs_write_checkpoint(struct f2fs_sb_info *sbi, struct cp_control *cpc);
 void f2fs_init_ino_entry_info(struct f2fs_sb_info *sbi);
 int __init f2fs_create_checkpoint_caches(void);
 void f2fs_destroy_checkpoint_caches(void);
+int f2fs_issue_checkpoint(struct f2fs_sb_info *sbi);
+int f2fs_start_ckpt_thread(struct f2fs_sb_info *sbi);
+void f2fs_stop_ckpt_thread(struct f2fs_sb_info *sbi);
+void f2fs_flush_ckpt_thread(struct f2fs_sb_info *sbi);
+void f2fs_init_ckpt_req_control(struct f2fs_sb_info *sbi);
 
 /*
  * data.c
