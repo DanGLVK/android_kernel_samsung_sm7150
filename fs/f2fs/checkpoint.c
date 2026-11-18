@@ -1706,6 +1706,13 @@ repeat:
 
 void f2fs_flush_ckpt_thread(struct f2fs_sb_info *sbi)
 {
+	struct ckpt_req_control *cprc = &sbi->cprc_info;
+
+	if (cprc->f2fs_issue_ckpt) {
+		f2fs_issue_checkpoint(sbi);
+		return;
+	}
+
 	__checkpoint_and_complete_reqs(sbi);
 }
 
@@ -1738,7 +1745,10 @@ int f2fs_issue_checkpoint(struct f2fs_sb_info *sbi)
 	atomic_inc(&cprc->queued_ckpt);
 	spin_unlock(&cprc->lock);
 
-	wake_up(&cprc->ckpt_wait_queue);
+	smp_mb();
+
+	if (waitqueue_active(&cprc->ckpt_wait_queue))
+		wake_up(&cprc->ckpt_wait_queue);
 
 	wait_for_completion(&req.wait);
 
