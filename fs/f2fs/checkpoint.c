@@ -1746,8 +1746,20 @@ int f2fs_issue_checkpoint(struct f2fs_sb_info *sbi)
 {
 	struct ckpt_req_control *cprc = &sbi->cprc_info;
 	struct ckpt_req req;
+	struct cp_control cpc;
 
-	if (!test_opt(sbi, MERGE_CHECKPOINT) || !cprc->f2fs_issue_ckpt)
+	cpc.reason = __get_cp_reason(sbi);
+	if (!test_opt(sbi, MERGE_CHECKPOINT) || cpc.reason != CP_SYNC) {
+		int ret;
+
+		down_write(&sbi->gc_lock);
+		ret = f2fs_write_checkpoint(sbi, &cpc);
+		up_write(&sbi->gc_lock);
+
+		return ret;
+	}
+
+	if (!cprc->f2fs_issue_ckpt)
 		return __write_checkpoint_sync(sbi);
 
 	init_ckpt_req(&req);
