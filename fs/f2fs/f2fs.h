@@ -1020,7 +1020,6 @@ struct ckpt_req {
 	struct completion wait;
 	struct llist_node llnode;
 	int ret;
-	int type;
 	ktime_t queue_time;
 };
 

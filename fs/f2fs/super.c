@@ -218,6 +218,7 @@ static match_table_t f2fs_tokens = {
 	{Opt_checkpoint_disable_cap_perc, "checkpoint=disable:%u%%"},
 	{Opt_checkpoint_enable, "checkpoint=enable"},
 	{Opt_checkpoint_merge, "checkpoint=merge"},
+	{Opt_nocheckpoint_merge, "checkpoint=nomerge"},
 	{Opt_compress_algorithm, "compress_algorithm=%s"},
 	{Opt_compress_log_size, "compress_log_size=%u"},
 	{Opt_compress_extension, "compress_extension=%s"},
