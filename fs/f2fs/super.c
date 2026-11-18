@@ -1235,6 +1235,8 @@ static void f2fs_put_super(struct super_block *sb)
 	int i;
 	bool dropped;
 
+	sbi->umount_lock_holder = current;
+
 	f2fs_stop_ckpt_thread(sbi);
 
 	/* unregister procfs/sysfs entries in advance to avoid race case */
@@ -1362,7 +1364,9 @@ static int f2fs_freeze(struct super_block *sb)
 	if (is_sbi_flag_set(F2FS_SB(sb), SBI_IS_DIRTY))
 		return -EINVAL;
 
+	F2FS_SB(sb)->umount_lock_holder = current;
 	f2fs_flush_ckpt_thread(F2FS_SB(sb));
+	F2FS_SB(sb)->umount_lock_holder = NULL;
 	return 0;
 }
 
@@ -1820,6 +1824,8 @@ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
 	int i, j;
 #endif
 
+	sbi->umount_lock_holder = current;
+
 	/*
 	 * Save the old mount options in case we
 	 * need to restore them.
@@ -1837,6 +1843,7 @@ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
 			if (!org_mount_opt.s_qf_names[i]) {
 				for (j = 0; j < i; j++)
 					kvfree(org_mount_opt.s_qf_names[j]);
+				sbi->umount_lock_holder = NULL;
 				return -ENOMEM;
 			}
 		} else {
@@ -1980,6 +1987,7 @@ skip:
 	limit_reserve_root(sbi);
 	adjust_unusable_cap_perc(sbi);
 	*flags = (*flags & ~SB_LAZYTIME) | (sb->s_flags & SB_LAZYTIME);
+	sbi->umount_lock_holder = NULL;
 	return 0;
 restore_gc:
 	if (need_restart_gc) {
@@ -1998,6 +2006,7 @@ restore_opts:
 #endif
 	sbi->mount_opt = org_mount_opt;
 	sb->s_flags = old_sb_flags;
+	sbi->umount_lock_holder = NULL;
 	return err;
 }
 
@@ -2244,6 +2253,7 @@ int f2fs_quota_sync(struct super_block *sb, int type)
 	 */
 	f2fs_lock_op(sbi);
 
+	sbi->umount_lock_holder = current;
 	down_read(&sbi->quota_sem);
 	ret = dquot_writeback_dquots(sb, type);
 	if (ret)
@@ -2282,6 +2292,7 @@ int f2fs_quota_sync(struct super_block *sb, int type)
 out:
 	if (ret)
 		set_sbi_flag(F2FS_SB(sb), SBI_QUOTA_NEED_REPAIR);
+	sbi->umount_lock_holder = NULL;
 	up_read(&sbi->quota_sem);
 	f2fs_unlock_op(sbi);
 	return ret;
@@ -3512,6 +3523,7 @@ try_onemore:
 		return -ENOMEM;
 
 	sbi->sb = sb;
+	sbi->umount_lock_holder = current;
 
 	/* Load the checksum driver */
 	sbi->s_chksum_driver = crypto_alloc_shash("crc32", 0, 0);
@@ -3900,6 +3912,7 @@ reset_checkpoint:
 	f2fs_update_time(sbi, CP_TIME);
 	f2fs_update_time(sbi, REQ_TIME);
 	clear_sbi_flag(sbi, SBI_CP_DISABLED_QUICK);
+	sbi->umount_lock_holder = NULL;
 	return 0;
 
 sync_free_meta:

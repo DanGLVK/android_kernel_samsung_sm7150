@@ -1194,7 +1194,11 @@ retry_flush_quotas:
 		f2fs_unlock_all(sbi);
 
 		/* only failed during mount/umount/freeze/quotactl */
-		locked = down_read_trylock(&sbi->sb->s_umount);
+		if (sbi->umount_lock_holder == current) {
+			locked = 0;
+		} else {
+			locked = down_read_trylock(&sbi->sb->s_umount);
+		}
 		f2fs_quota_sync(sbi->sb, -1);
 		if (locked)
 			up_read(&sbi->sb->s_umount);
@@ -1723,7 +1727,8 @@ int f2fs_issue_checkpoint(struct f2fs_sb_info *sbi)
 	struct cp_control cpc;
 
 	cpc.reason = __get_cp_reason(sbi);
-	if (!test_opt(sbi, MERGE_CHECKPOINT) || cpc.reason != CP_SYNC) {
+	if (!test_opt(sbi, MERGE_CHECKPOINT) || cpc.reason != CP_SYNC ||
+			sbi->umount_lock_holder == current) {
 		int ret;
 
 		down_write(&sbi->gc_lock);

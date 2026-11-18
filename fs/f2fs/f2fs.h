@@ -1516,6 +1516,7 @@ struct f2fs_sb_info {
 
 	unsigned int nquota_files;		/* # of quota sysfile */
 	struct rw_semaphore quota_sem;		/* blocking cp for flags */
+	struct task_struct *umount_lock_holder;	/* task holding s_umount */
 
 	/* # of pages, see count_type */
 	atomic_t nr_pages[NR_COUNT_TYPE];
