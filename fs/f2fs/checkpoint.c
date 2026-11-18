@@ -1693,11 +1693,11 @@ static int issue_checkpoint_thread(void *data)
 	struct ckpt_req_control *cprc = &sbi->cprc_info;
 	wait_queue_head_t *q = &cprc->ckpt_wait_queue;
 repeat:
-	if (kthread_should_stop())
-		return 0;
-
 	if (!llist_empty(&cprc->issue_list))
 		__checkpoint_and_complete_reqs(sbi);
+
+	if (kthread_should_stop())
+		return 0;
 
 	wait_event_interruptible(*q,
 		kthread_should_stop() || !llist_empty(&cprc->issue_list));
