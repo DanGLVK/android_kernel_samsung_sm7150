@@ -1955,6 +1955,7 @@ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
 		clear_opt(sbi, MERGE_CHECKPOINT);
 		f2fs_stop_ckpt_thread(sbi);
 	} else {
+		f2fs_flush_ckpt_thread(sbi);
 		err = f2fs_start_ckpt_thread(sbi);
 		if (err)
 			goto restore_gc;
@@ -3545,6 +3546,7 @@ try_onemore:
 		goto free_sb_buf;
 	}
 #endif
+	f2fs_init_ckpt_req_control(sbi);
 	default_options(sbi);
 	/* parse mount options */
 	options = kstrdup((const char *)data, GFP_KERNEL);
@@ -3719,8 +3721,6 @@ try_onemore:
 	f2fs_init_extent_cache_info(sbi);
 
 	f2fs_init_ino_entry_info(sbi);
-
-	f2fs_init_ckpt_req_control(sbi);
 
 	f2fs_init_fsync_node_info(sbi);
 
