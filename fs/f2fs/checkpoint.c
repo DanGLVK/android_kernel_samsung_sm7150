@@ -1699,32 +1699,14 @@ repeat:
 	if (kthread_should_stop())
 		return 0;
 
-	wait_event_interruptible(*q,
+	wait_event(*q,
 		kthread_should_stop() || !llist_empty(&cprc->issue_list));
 	goto repeat;
 }
 
 void f2fs_flush_ckpt_thread(struct f2fs_sb_info *sbi)
 {
-	struct ckpt_req_control *cprc = &sbi->cprc_info;
-	struct llist_node *list;
-	struct ckpt_req *req, *next;
-	int ret;
-
-	list = llist_del_all(&cprc->issue_list);
-	if (!list)
-		return;
-	list = llist_reverse_order(list);
-
-	ret = __write_checkpoint_sync(sbi);
-	atomic_inc(&cprc->issued_ckpt);
-
-	llist_for_each_entry_safe(req, next, list, llnode) {
-		atomic_dec(&cprc->queued_ckpt);
-		atomic_inc(&cprc->total_ckpt);
-		req->ret = ret;
-		complete(&req->wait);
-	}
+	__checkpoint_and_complete_reqs(sbi);
 }
 
 int f2fs_issue_checkpoint(struct f2fs_sb_info *sbi)
@@ -1756,11 +1738,7 @@ int f2fs_issue_checkpoint(struct f2fs_sb_info *sbi)
 	atomic_inc(&cprc->queued_ckpt);
 	spin_unlock(&cprc->lock);
 
-	/* update issue_list before we wake up issue_checkpoint thread */
-	smp_mb();
-
-	if (waitqueue_active(&cprc->ckpt_wait_queue))
-		wake_up(&cprc->ckpt_wait_queue);
+	wake_up(&cprc->ckpt_wait_queue);
 
 	wait_for_completion(&req.wait);
 
@@ -1783,7 +1761,7 @@ int f2fs_start_ckpt_thread(struct f2fs_sb_info *sbi)
 	}
 	spin_unlock(&cprc->lock);
 
-	ckpt_task = kthread_run(issue_checkpoint_thread, sbi,
+	ckpt_task = kthread_create(issue_checkpoint_thread, sbi,
 			"f2fs_ckpt-%u:%u", MAJOR(dev), MINOR(dev));
 	if (IS_ERR(ckpt_task))
 		return PTR_ERR(ckpt_task);
@@ -1799,6 +1777,7 @@ int f2fs_start_ckpt_thread(struct f2fs_sb_info *sbi)
 	cprc->f2fs_issue_ckpt = ckpt_task;
 	spin_unlock(&cprc->lock);
 
+	wake_up_process(ckpt_task);
 	return 0;
 }
 
