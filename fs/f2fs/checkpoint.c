@@ -1714,6 +1714,7 @@ void f2fs_flush_ckpt_thread(struct f2fs_sb_info *sbi)
 	list = llist_del_all(&cprc->issue_list);
 	if (!list)
 		return;
+	list = llist_reverse_order(list);
 
 	ret = __write_checkpoint_sync(sbi);
 	atomic_inc(&cprc->issued_ckpt);
@@ -1754,6 +1755,9 @@ int f2fs_issue_checkpoint(struct f2fs_sb_info *sbi)
 	llist_add(&req.llnode, &cprc->issue_list);
 	atomic_inc(&cprc->queued_ckpt);
 	spin_unlock(&cprc->lock);
+
+	/* update issue_list before we wake up issue_checkpoint thread */
+	smp_mb();
 
 	if (waitqueue_active(&cprc->ckpt_wait_queue))
 		wake_up(&cprc->ckpt_wait_queue);
