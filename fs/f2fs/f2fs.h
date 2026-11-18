@@ -1031,6 +1031,7 @@ struct ckpt_req_control {
 	atomic_t total_ckpt;			/* # of total checkpoints */
 	atomic_t queued_ckpt;			/* # of queued checkpoints */
 	struct llist_head issue_list;		/* list for command issue */
+	spinlock_t lock;			/* protect f2fs_issue_ckpt */
 	int ckpt_thread_ioprio;			/* checkpoint thread ioprio */
 };
 
