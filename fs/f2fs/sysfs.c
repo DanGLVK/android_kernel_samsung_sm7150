@@ -351,9 +351,11 @@ static ssize_t __sbi_store(struct f2fs_attr *a,
 		if (data < 0 || data >= IOPRIO_BE_NR)
 			return -EINVAL;
 
+		spin_lock(&cprc->lock);
 		cprc->ckpt_thread_ioprio = IOPRIO_PRIO_VALUE(class, data);
 		if (cprc->f2fs_issue_ckpt)
 			set_task_ioprio(cprc->f2fs_issue_ckpt, cprc->ckpt_thread_ioprio);
+		spin_unlock(&cprc->lock);
 
 		return count;
 	}
